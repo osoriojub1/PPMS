@@ -1,0 +1,308 @@
+@import "tailwindcss";
+
+/* Light Theme (Default) */
+:root {
+    --bg-primary: #f9fafb;
+    --bg-secondary: #ffffff;
+    --bg-tertiary: #f3f4f6;
+    --bg-hover: #f9fafb;
+    --bg-input: #f9fafb;
+    --bg-sidebar: #ffffff;
+    --bg-card: #ffffff;
+    --bg-modal-backdrop: rgba(0, 0, 0, 0.6);
+
+    --border-primary: #e5e7eb;
+    --border-secondary: #f3f4f6;
+    --border-input: #d1d5db;
+
+    --text-primary: #111827;
+    --text-secondary: #6b7280;
+    --text-tertiary: #9ca3af;
+    --text-muted: #d1d5db;
+    --text-on-accent: #ffffff;
+
+    --accent-blue: #2563eb;
+    --accent-blue-hover: #1d4ed8;
+    --accent-blue-bg: #eff6ff;
+    --accent-blue-text: #1d4ed8;
+    --accent-green: #16a34a;
+    --accent-green-bg: #f0fdf4;
+    --accent-amber: #d97706;
+    --accent-amber-bg: #fffbeb;
+    --accent-red: #dc2626;
+    --accent-red-bg: #fef2f2;
+
+    --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+    --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+    --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1);
+}
+
+/* Dark Theme */
+.dark {
+    --bg-primary: #0f172a;
+    --bg-secondary: #1e293b;
+    --bg-tertiary: #334155;
+    --bg-hover: #334155;
+    --bg-input: #1e293b;
+    --bg-sidebar: #1e293b;
+    --bg-card: #1e293b;
+    --bg-modal-backdrop: rgba(0, 0, 0, 0.8);
+
+    --border-primary: #334155;
+    --border-secondary: #1e293b;
+    --border-input: #475569;
+
+    --text-primary: #f1f5f9;
+    --text-secondary: #94a3b8;
+    --text-tertiary: #64748b;
+    --text-muted: #475569;
+    --text-on-accent: #ffffff;
+
+    --accent-blue: #3b82f6;
+    --accent-blue-hover: #2563eb;
+    --accent-blue-bg: #1e3a5f;
+    --accent-blue-text: #93c5fd;
+    --accent-green: #22c55e;
+    --accent-green-bg: #14532d;
+    --accent-amber: #f59e0b;
+    --accent-amber-bg: #451a03;
+    --accent-red: #ef4444;
+    --accent-red-bg: #450a0a;
+
+    --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.3);
+    --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.4);
+    --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.5);
+}
+
+/* Global dark mode overrides using Tailwind's dark variant */
+.dark body {
+    background-color: var(--bg-primary);
+    color: var(--text-primary);
+}
+
+/* Sidebar dark override */
+.dark .sidebar-container {
+    background-color: var(--bg-sidebar);
+    border-color: var(--border-primary);
+}
+
+.dark .sidebar-container a {
+    color: var(--text-secondary);
+}
+
+.dark .sidebar-container a:hover {
+    background-color: var(--bg-tertiary);
+    color: var(--text-primary);
+}
+
+.dark .sidebar-container a.active {
+    background-color: var(--accent-blue-bg);
+    color: var(--accent-blue-text);
+}
+
+/* Main content dark overrides */
+.dark .main-content {
+    background-color: var(--bg-primary);
+}
+
+/* Card dark overrides */
+.dark .card,
+.dark .bg-white {
+    background-color: var(--bg-card) !important;
+    border-color: var(--border-primary) !important;
+    color: var(--text-primary);
+}
+
+/* Text overrides */
+.dark .text-gray-900 {
+    color: var(--text-primary) !important;
+}
+
+.dark .text-gray-800 {
+    color: var(--text-primary) !important;
+}
+
+.dark .text-gray-700 {
+    color: var(--text-secondary) !important;
+}
+
+.dark .text-gray-600 {
+    color: var(--text-secondary) !important;
+}
+
+.dark .text-gray-500 {
+    color: var(--text-tertiary) !important;
+}
+
+.dark .text-gray-400 {
+    color: var(--text-tertiary) !important;
+}
+
+.dark .text-gray-300 {
+    color: var(--text-muted) !important;
+}
+
+/* Background overrides */
+.dark .bg-gray-50 {
+    background-color: var(--bg-primary) !important;
+}
+
+.dark .bg-gray-100 {
+    background-color: var(--bg-tertiary) !important;
+}
+
+.dark .bg-gray-200 {
+    background-color: var(--bg-tertiary) !important;
+}
+
+/* Border overrides */
+.dark .border-gray-200 {
+    border-color: var(--border-primary) !important;
+}
+
+.dark .border-gray-300 {
+    border-color: var(--border-primary) !important;
+}
+
+.dark .border-gray-100 {
+    border-color: var(--border-secondary) !important;
+}
+
+/* Input overrides */
+.dark input,
+.dark select,
+.dark textarea {
+    background-color: var(--bg-input) !important;
+    border-color: var(--border-input) !important;
+    color: var(--text-primary) !important;
+}
+
+.dark input::placeholder,
+.dark textarea::placeholder {
+    color: var(--text-muted) !important;
+}
+
+/* Hover states */
+.dark .hover\:bg-gray-50:hover {
+    background-color: var(--bg-hover) !important;
+}
+
+.dark .hover\:bg-gray-100:hover {
+    background-color: var(--bg-tertiary) !important;
+}
+
+/* Table overrides */
+.dark table th {
+    background-color: var(--bg-tertiary) !important;
+    color: var(--text-secondary) !important;
+    border-color: var(--border-primary) !important;
+}
+
+.dark table td {
+    border-color: var(--border-primary) !important;
+    color: var(--text-primary) !important;
+}
+
+.dark table tr:hover td {
+    background-color: var(--bg-hover) !important;
+}
+
+/* Scrollbar styling for dark mode */
+.dark ::-webkit-scrollbar {
+    width: 8px;
+}
+
+.dark ::-webkit-scrollbar-track {
+    background: var(--bg-secondary);
+}
+
+.dark ::-webkit-scrollbar-thumb {
+    background: var(--border-primary);
+    border-radius: 4px;
+}
+
+.dark ::-webkit-scrollbar-thumb:hover {
+    background: var(--text-muted);
+}
+
+/* Modal backdrop dark */
+.dark .bg-black\/60 {
+    background-color: var(--bg-modal-backdrop) !important;
+}
+
+/* Blue accent backgrounds in dark mode */
+.dark .bg-blue-50 {
+    background-color: var(--accent-blue-bg) !important;
+}
+
+.dark .bg-blue-100 {
+    background-color: var(--accent-blue-bg) !important;
+}
+
+.dark .text-blue-700 {
+    color: var(--accent-blue-text) !important;
+}
+
+.dark .text-blue-600 {
+    color: var(--accent-blue-text) !important;
+}
+
+.dark .border-blue-100 {
+    border-color: #1e3a5f !important;
+}
+
+.dark .border-blue-200 {
+    border-color: #1e3a5f !important;
+}
+
+/* Green accent backgrounds in dark mode */
+.dark .bg-green-50 {
+    background-color: var(--accent-green-bg) !important;
+}
+
+.dark .bg-green-100 {
+    background-color: var(--accent-green-bg) !important;
+}
+
+.dark .text-green-700 {
+    color: #4ade80 !important;
+}
+
+.dark .border-green-200 {
+    border-color: #14532d !important;
+}
+
+/* Amber accent backgrounds in dark mode */
+.dark .bg-amber-50 {
+    background-color: var(--accent-amber-bg) !important;
+}
+
+.dark .bg-amber-100 {
+    background-color: var(--accent-amber-bg) !important;
+}
+
+.dark .text-amber-700 {
+    color: #fbbf24 !important;
+}
+
+.dark .border-amber-100 {
+    border-color: #451a03 !important;
+}
+
+.dark .border-amber-200 {
+    border-color: #451a03 !important;
+}
+
+/* Purple accent in dark mode */
+.dark .bg-purple-50 {
+    background-color: #2e1065 !important;
+}
+
+.dark .text-purple-700 {
+    color: #c084fc !important;
+}
+
+/* Shadow overrides */
+.dark [class*="shadow"] {
+    --tw-shadow-color: rgba(0, 0, 0, 0.3);
+}
