@@ -1,73 +1,70 @@
-# React + TypeScript + Vite
+# PPMS for Pregnant Women (Prenatal Patient Management System)
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+A comprehensive management system designed for Barangay Health Workers (BHW) and Administrators to track and manage maternal care for pregnant women.
 
-Currently, two official plugins are available:
+## Features
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+- **Admin Portal**: Dashboard, patient management, referral tracking, user management, and settings.
+- **BHW Portal**: Patient registration, maternal care tracking, referrals, and patient records.
+- **Maternal Care Milestones**: Track progress and findings throughout the pregnancy.
+- **Referral System**: Seamless transfer of findings and patient data between BHWs and Administrators.
 
-## React Compiler
+## Tech Stack
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+- **Frontend**: React 19, TypeScript, Vite
+- **Styling**: Tailwind CSS 4
+- **Backend & Database**: Supabase (PostgreSQL)
+- **Routing**: React Router 7
+- **UI Components**: Lucide React (Icons), TanStack Table
 
-## Expanding the ESLint configuration
+## Key Dependencies
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+### Core
+- `react`, `react-dom`: UI library
+- `react-router-dom`: Client-side routing
+- `@supabase/supabase-js`: Database and authentication client
+- `@tanstack/react-table`: Powerful data table management
+- `lucide-react`: Icon set
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+### Styling & Build
+- `tailwindcss`: Utility-first CSS framework
+- `@tailwindcss/vite`, `@tailwindcss/postcss`: Integration with Vite and PostCSS
+- `autoprefixer`: CSS vendor prefixing
+- `vite`: Build tool and dev server
+- `typescript`: Type safety
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+## Getting Started
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+### Prerequisites
+- Node.js (Latest LTS recommended)
+- npm or yarn
+
+### Installation
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/osoriojub1/PPMS.git
+   ```
+2. Install dependencies:
+   ```bash
+   npm install
+   ```
+
+### Development
+Start the development server:
+```bash
+npm run dev
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
-
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+### Build
+Generate a production-ready build:
+```bash
+npm run build
 ```
+
+## Environment Setup
+Create a `.env` file based on `.env.example` and add your Supabase credentials:
+```env
+VITE_SUPABASE_URL=your_supabase_url
+VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
+```
+
