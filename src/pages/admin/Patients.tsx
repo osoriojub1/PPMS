@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
+import { supabase } from '../../lib/supabase';
 import {
     createColumnHelper,
     flexRender,
@@ -11,7 +12,6 @@ import {
     type SortingState,
     type PaginationState,
 } from '@tanstack/react-table';
-import { mockPatients } from '../../lib/mockData';
 import {
     Calendar,
     MapPin,
@@ -24,14 +24,28 @@ import {
     ArrowDown,
     ChevronLeft,
     ChevronsLeft,
-    ChevronsRight
+    ChevronsRight,
+    Loader2
 } from 'lucide-react';
 
-type Patient = typeof mockPatients[0];
-const columnHelper = createColumnHelper<Patient>();
+interface PatientRecord {
+    id: string;
+    first_name: string;
+    last_name: string;
+    mi?: string;
+    age: number;
+    barangay: string;
+    created_at: string;
+    pregnancy_cycles: {
+        status: 'Active' | 'Completed';
+    }[];
+}
+
+const columnHelper = createColumnHelper<PatientRecord>();
 
 const columns = [
-    columnHelper.accessor('patientName', {
+    columnHelper.accessor(row => `${row.first_name} ${row.mi ? row.mi + ' ' : ''}${row.last_name}`, {
+        id: 'patientName',
         header: ({ column }) => (
             <button
                 className="flex items-center space-x-1 hover:text-gray-700 font-medium text-xs uppercase tracking-wider"
@@ -79,7 +93,8 @@ const columns = [
             </div>
         ),
     }),
-    columnHelper.accessor('admittedDate', {
+    columnHelper.accessor('created_at', {
+        id: 'admittedDate',
         header: ({ column }) => (
             <button
                 className="flex items-center space-x-1 hover:text-gray-700 font-medium text-xs uppercase tracking-wider"
@@ -99,7 +114,8 @@ const columns = [
             );
         },
     }),
-    columnHelper.accessor('status', {
+    columnHelper.accessor(row => row.pregnancy_cycles[0]?.status || 'Completed', {
+        id: 'status',
         header: 'Cycle Status',
         cell: info => {
             const status = info.getValue();
@@ -129,13 +145,34 @@ const columns = [
 
 const Patients = () => {
     const navigate = useNavigate();
-    const [data] = useState(() => [...mockPatients]);
+    const [data, setData] = useState<PatientRecord[]>([]);
+    const [loading, setLoading] = useState(true);
     const [globalFilter, setGlobalFilter] = useState('');
     const [sorting, setSorting] = useState<SortingState>([]);
     const [pagination, setPagination] = useState<PaginationState>({
         pageIndex: 0,
-        pageSize: 5,
+        pageSize: 10,
     });
+
+    useEffect(() => {
+        const fetchPatients = async () => {
+            setLoading(true);
+            const { data: patients, error } = await supabase
+                .from('patients')
+                .select('*, pregnancy_cycles(status)')
+                .eq('is_admitted', true)
+                .order('created_at', { ascending: false });
+
+            if (error) {
+                console.error('Error fetching patients:', error);
+            } else {
+                setData(patients || []);
+            }
+            setLoading(false);
+        };
+
+        fetchPatients();
+    }, []);
 
     const table = useReactTable({
         data,
@@ -153,6 +190,7 @@ const Patients = () => {
         getFilteredRowModel: getFilteredRowModel(),
         getPaginationRowModel: getPaginationRowModel(),
     });
+
 
     return (
         <div className="space-y-6">
@@ -201,7 +239,16 @@ const Patients = () => {
                         ))}
                     </thead>
                     <tbody className="divide-y divide-gray-200 bg-white">
-                        {table.getRowModel().rows.map(row => (
+                        {loading ? (
+                            <tr>
+                                <td colSpan={columns.length} className="px-6 py-12 text-center text-gray-500">
+                                    <div className="flex flex-col items-center justify-center space-y-3">
+                                        <Loader2 className="h-8 w-8 text-blue-500 animate-spin" />
+                                        <p className="text-sm font-medium">Fetching patient records...</p>
+                                    </div>
+                                </td>
+                            </tr>
+                        ) : table.getRowModel().rows.map(row => (
                             <tr
                                 key={row.id}
                                 className="hover:bg-gray-50 transition-colors cursor-pointer"

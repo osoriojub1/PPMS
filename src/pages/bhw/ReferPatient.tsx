@@ -1,41 +1,134 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { mockPatients, mockReferrals, type Patient } from '../../lib/mockData';
-import { ArrowLeft, User, Send, FileText, ClipboardList } from 'lucide-react';
+import { supabase } from '../../lib/supabase';
+import { ArrowLeft, User, Send, FileText, ClipboardList, Loader2, CheckCircle2, X } from 'lucide-react';
 
 const ReferPatient = () => {
     const { id } = useParams();
     const navigate = useNavigate();
 
-    const record = (mockPatients.find(p => p.id === id) || mockReferrals.find(r => r.id === id)) as Patient | any;
-
+    const [record, setRecord] = useState<any>(null);
+    const [loading, setLoading] = useState(true);
+    const [sending, setSending] = useState(false);
     const [subjective, setSubjective] = useState('');
     const [objective, setObjective] = useState('');
+    const [toast, setToast] = useState<string | null>(null);
+
+    const fetchPatient = useCallback(async () => {
+        if (!id) return;
+        setLoading(true);
+        try {
+            const { data, error } = await supabase
+                .from('patients')
+                .select('*, pregnancy_cycles(id, status, estimated_due_date)')
+                .eq('id', id)
+                .single();
+
+            if (error) throw error;
+            setRecord(data);
+        } catch (err) {
+            console.error('Error fetching patient:', err);
+        } finally {
+            setLoading(false);
+        }
+    }, [id]);
+
+    useEffect(() => {
+        fetchPatient();
+    }, [fetchPatient]);
+
+    const handleRefer = async () => {
+        if (!subjective || !objective || !record) return;
+
+        setSending(true);
+        try {
+            const { data: { user } } = await supabase.auth.getUser();
+
+            // Find active cycle or create one
+            const activeCycle = record.pregnancy_cycles?.find((c: any) => c.status === 'Active' || c.status === 'active');
+
+            let cycleId = activeCycle?.id;
+
+            if (!cycleId) {
+                // Create a new pregnancy cycle
+                const { data: newCycle, error: cycleError } = await supabase
+                    .from('pregnancy_cycles')
+                    .insert({
+                        patient_id: record.id,
+                        status: 'Active'
+                    })
+                    .select()
+                    .single();
+
+                if (cycleError) throw cycleError;
+                cycleId = newCycle.id;
+            }
+
+            // Create referral
+            const { error: referralError } = await supabase.from('referrals').insert({
+                cycle_id: cycleId,
+                patient_id: record.id,
+                status: 'Pending',
+                referred_by_user_id: user?.id,
+                referred_at: new Date().toISOString(),
+                subjective,
+                objective
+            });
+
+            if (referralError) throw referralError;
+
+            // Create notification for MHO Admin
+            await supabase.from('notifications').insert({
+                patient_id: record.id,
+                type: 'referral',
+                title: 'New Patient Referral',
+                content: `${record.first_name} ${record.last_name} has been referred from ${record.barangay}.`,
+                barangay_target: record.barangay // Admin can filter by this
+            });
+
+            setToast('Referral sent to MHO successfully!');
+            setTimeout(() => {
+                navigate('/bhw/referrals');
+            }, 1500);
+        } catch (err: any) {
+            console.error('Error sending referral:', err);
+            alert(`Failed to send referral: ${err.message}`);
+        } finally {
+            setSending(false);
+        }
+    };
+
+    if (loading) {
+        return (
+            <div className="flex flex-col items-center justify-center py-32 space-y-4">
+                <Loader2 className="h-10 w-10 text-blue-500 animate-spin" />
+                <p className="text-gray-500 font-medium">Loading patient details...</p>
+            </div>
+        );
+    }
 
     if (!record) {
         return <div className="p-8 text-center text-gray-500">Patient not found</div>;
     }
 
-    const handleRefer = () => {
-        // In a real app, this would send an API request to creating a Referral record with findings
-        console.log('Referring patient with SOAP notes:', { subjective, objective });
-
-        // Simulating the transfer logic for the mock data demonstration
-        const referralData = {
-            id: record.id,
-            patientName: record.patientName,
-            subjective: subjective,
-            objective: objective,
-            timestamp: new Date().toISOString()
-        };
-
-        console.log('Referral Data Prepared for Milestones:', referralData);
-        alert(`Patient referral sent to MHO successfully!\n\nSubjective: ${subjective.substring(0, 30)}...\nObjective: ${objective.substring(0, 30)}...`);
-        navigate('/bhw/referrals');
-    };
+    const activeCycle = record.pregnancy_cycles?.find((c: any) => c.status === 'Active' || c.status === 'active');
+    const patientName = `${record.first_name} ${record.mi ? record.mi + ' ' : ''}${record.last_name}`;
 
     return (
         <div className="max-w-4xl mx-auto pb-12">
+            {/* Toast */}
+            {toast && (
+                <div className="fixed top-4 right-4 z-[100] animate-in fade-in slide-in-from-top-2 duration-300">
+                    <div className="bg-green-600 text-white px-6 py-3 rounded-xl shadow-lg flex items-center space-x-3">
+                        <CheckCircle2 size={18} />
+                        <span className="text-sm font-bold">{toast}</span>
+                        <button onClick={() => setToast(null)} className="ml-2 hover:bg-green-700 p-1 rounded-full transition-colors">
+                            <X size={14} />
+                        </button>
+                    </div>
+                </div>
+            )}
+
             <button
                 onClick={() => navigate(-1)}
                 className="mb-6 flex items-center text-gray-500 hover:text-gray-900 transition-colors"
@@ -64,8 +157,8 @@ const ReferPatient = () => {
                             <User size={20} />
                         </div>
                         <div>
-                            <p className="text-sm font-bold text-gray-900">{record.patientName}</p>
-                            <p className="text-xs text-gray-500">{record.barangay} • Age: {record.age} • EDD: {record.estimatedDue}</p>
+                            <p className="text-sm font-bold text-gray-900">{patientName}</p>
+                            <p className="text-xs text-gray-500">{record.barangay} • Age: {record.age} • EDD: {activeCycle?.estimated_due_date || 'N/A'}</p>
                         </div>
                     </div>
 
@@ -102,11 +195,20 @@ const ReferPatient = () => {
                     <div className="pt-8 border-t flex justify-end">
                         <button
                             onClick={handleRefer}
-                            disabled={!subjective || !objective}
+                            disabled={!subjective || !objective || sending}
                             className="bg-blue-600 text-white px-10 py-3 rounded-lg font-bold hover:bg-blue-700 transition-all flex items-center shadow-lg transform hover:-translate-y-0.5 disabled:bg-gray-300 disabled:transform-none disabled:shadow-none"
                         >
-                            <Send size={20} className="mr-2" />
-                            Send Referral to MHO
+                            {sending ? (
+                                <>
+                                    <Loader2 size={20} className="mr-2 animate-spin" />
+                                    Sending...
+                                </>
+                            ) : (
+                                <>
+                                    <Send size={20} className="mr-2" />
+                                    Send Referral to MHO
+                                </>
+                            )}
                         </button>
                     </div>
                 </div>

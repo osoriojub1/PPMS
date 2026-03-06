@@ -1,4 +1,5 @@
 import { NavLink, Outlet } from 'react-router-dom';
+import { supabase } from '../../lib/supabase';
 import {
     LayoutDashboard,
     Users,
@@ -9,13 +10,30 @@ import {
     Shield
 } from 'lucide-react';
 
+import { useNotification } from '../../contexts/NotificationContext';
+
 const Sidebar = () => {
+    const { unreadCount } = useNotification();
+
     const navItems = [
         { path: '/admin', icon: <LayoutDashboard size={20} />, label: 'Dashboard' },
         { path: '/admin/referrals', icon: <ClipboardList size={20} />, label: 'Referrals' },
         { path: '/admin/patients', icon: <Users size={20} />, label: 'Patients' },
         { path: '/admin/users', icon: <Shield size={20} />, label: 'User Management' },
-        { path: '/admin/notifications', icon: <Bell size={20} />, label: 'Notifications' },
+        {
+            path: '/admin/notifications',
+            icon: (
+                <div className="relative">
+                    <Bell size={20} />
+                    {unreadCount > 0 && (
+                        <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white border-2 border-white shadow-sm">
+                            {unreadCount > 9 ? '9+' : unreadCount}
+                        </span>
+                    )}
+                </div>
+            ),
+            label: 'Notifications'
+        },
         { path: '/admin/settings', icon: <Settings size={20} />, label: 'Settings' },
     ];
 
@@ -49,7 +67,10 @@ const Sidebar = () => {
             </div>
 
             <div className="p-4 border-t">
-                <button className="flex items-center space-x-3 px-4 py-3 rounded-lg text-gray-600 hover:bg-gray-50 hover:text-gray-900 transition-colors w-full">
+                <button
+                    onClick={() => supabase.auth.signOut()}
+                    className="flex items-center space-x-3 px-4 py-3 rounded-lg text-gray-600 hover:bg-gray-50 hover:text-gray-900 transition-colors w-full"
+                >
                     <LogOut size={20} />
                     <span>Log Out</span>
                 </button>

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
     createColumnHelper,
     flexRender,
@@ -8,7 +8,7 @@ import {
     useReactTable,
     type SortingState,
 } from '@tanstack/react-table';
-import { mockUsers, type UserAccount } from '../../lib/mockData';
+import { supabase, setSkipAuthChange } from '../../lib/supabase';
 import {
     User,
     Shield,
@@ -23,33 +23,70 @@ import {
     X,
     Save,
     Key,
-    UserCircle
+    UserCircle,
+    Edit,
+    Trash2,
+    AlertTriangle,
+    Loader2
 } from 'lucide-react';
 
-const columnHelper = createColumnHelper<UserAccount>();
+import { VALLADOLID_BARANGAYS as BARANGAYS } from '../../lib/constants';
 
-const BARANGAYS = ['Poblacion', 'Tabao', 'Alijis', 'Bayabas', 'Crossing Magallon'];
+interface Profile {
+    id: string;
+    full_name: string;
+    role: 'mho_admin' | 'bhw';
+    barangay?: string;
+    status: 'Active' | 'Inactive';
+    email?: string;
+    username?: string;
+}
+
+const columnHelper = createColumnHelper<Profile>();
 
 const UserManagement = () => {
-    const [data, setData] = useState(() => [...mockUsers]);
+    const [data, setData] = useState<Profile[]>([]);
+    const [loading, setLoading] = useState(true);
     const [globalFilter, setGlobalFilter] = useState('');
     const [sorting, setSorting] = useState<SortingState>([]);
 
     // Modal states
     const [showCreateModal, setShowCreateModal] = useState(false);
-    const [showPasswordModal, setShowPasswordModal] = useState(false);
-    const [selectedUser, setSelectedUser] = useState<UserAccount | null>(null);
+    const [showEditModal, setShowEditModal] = useState(false);
+    const [showDeleteModal, setShowDeleteModal] = useState(false);
+    const [selectedUser, setSelectedUser] = useState<Profile | null>(null);
     const [showActionMenu, setShowActionMenu] = useState<string | null>(null);
 
     // Form states
-    const [newUser, setNewUser] = useState<Partial<UserAccount>>({
+    const [newUser, setNewUser] = useState<any>({
         role: 'bhw',
         status: 'Active',
+        barangay: BARANGAYS[0],
     });
-    const [newPassword, setNewPassword] = useState('');
+    const [editingUser, setEditingUser] = useState<Partial<Profile>>({});
+
+    const fetchUsers = useCallback(async () => {
+        setLoading(true);
+        try {
+            const { data: profiles, error } = await supabase
+                .from('profiles')
+                .select('*');
+
+            if (error) throw error;
+            setData(profiles || []);
+        } catch (err) {
+            console.error('Error fetching users:', err);
+        } finally {
+            setLoading(false);
+        }
+    }, []);
+
+    useEffect(() => {
+        fetchUsers();
+    }, [fetchUsers]);
 
     const columns = [
-        columnHelper.accessor('name', {
+        columnHelper.accessor('full_name', {
             header: ({ column }) => (
                 <button
                     className="flex items-center space-x-1 hover:text-gray-700 font-medium text-xs uppercase tracking-wider"
@@ -62,20 +99,20 @@ const UserManagement = () => {
             cell: info => (
                 <div className="flex items-center space-x-3">
                     <div className="h-8 w-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 font-bold text-xs uppercase">
-                        {info.getValue().charAt(0)}
+                        {(info.getValue() || '?').charAt(0)}
                     </div>
-                    <div className="font-medium text-gray-900">{info.getValue()}</div>
+                    <div className="font-medium text-gray-900">{info.getValue() || 'Unnamed User'}</div>
                 </div>
             ),
         }),
-        columnHelper.accessor(row => row.email || row.username, {
+        columnHelper.accessor(row => row.email || row.username || 'No identifier', {
             id: 'identifier',
             header: 'Email / Username',
             cell: info => {
                 const user = info.row.original;
                 return (
                     <div className="flex items-center text-gray-500">
-                        {user.email ? <Mail size={14} className="mr-2" /> : <UserCircle size={14} className="mr-2" />}
+                        {user.role === 'mho_admin' ? <Mail size={14} className="mr-2" /> : <UserCircle size={14} className="mr-2" />}
                         {info.getValue()}
                     </div>
                 );
@@ -121,7 +158,7 @@ const UserManagement = () => {
         columnHelper.accessor('status', {
             header: 'Status',
             cell: info => {
-                const status = info.getValue();
+                const status = info.getValue() || 'Active';
                 return (
                     <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${status === 'Active' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
                         }`}>
@@ -145,14 +182,39 @@ const UserManagement = () => {
                             <div className="py-1" role="menu" aria-orientation="vertical">
                                 <button
                                     onClick={() => {
-                                        setSelectedUser(info.row.original);
-                                        setShowPasswordModal(true);
+                                        setEditingUser({ ...info.row.original });
+                                        setShowEditModal(true);
                                         setShowActionMenu(null);
                                     }}
                                     className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 flex items-center"
                                     role="menuitem"
                                 >
-                                    <Key size={14} className="mr-2" /> Change Password
+                                    <Edit size={14} className="mr-2" /> Edit Details
+                                </button>
+                                <button
+                                    onClick={() => {
+                                        setSelectedUser(info.row.original);
+                                        // Password change requires user to be logged in usually, 
+                                        // or Admin API which we don't have here.
+                                        alert("Password management for other users requires administrative access to the Supabase Auth dashboard.");
+                                        setShowActionMenu(null);
+                                    }}
+                                    className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 flex items-center"
+                                    role="menuitem"
+                                >
+                                    <Key size={14} className="mr-2" /> Reset Password
+                                </button>
+                                <div className="border-t border-gray-100 my-1"></div>
+                                <button
+                                    onClick={() => {
+                                        setSelectedUser(info.row.original);
+                                        setShowDeleteModal(true);
+                                        setShowActionMenu(null);
+                                    }}
+                                    className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 flex items-center"
+                                    role="menuitem"
+                                >
+                                    <Trash2 size={14} className="mr-2" /> Delete Account
                                 </button>
                             </div>
                         </div>
@@ -176,32 +238,104 @@ const UserManagement = () => {
         getFilteredRowModel: getFilteredRowModel(),
     });
 
-    const handleCreateAccount = () => {
-        const id = `user-${data.length + 1}`;
-        const user: UserAccount = {
-            id,
-            name: newUser.name || '',
-            role: newUser.role as any,
-            barangay: newUser.role === 'bhw' ? newUser.barangay : undefined,
-            email: newUser.role === 'mho_admin' ? newUser.email : undefined,
-            username: newUser.role === 'bhw' ? newUser.username : undefined,
-            password: newUser.password,
-            status: 'Active',
-            lastLogin: new Date().toISOString(),
-        };
+    const handleCreateAccount = async () => {
+        setLoading(true);
+        try {
+            // Generate a valid email for Supabase Auth (BHWs log in with username only)
+            const email = newUser.role === 'mho_admin' ? newUser.email : `${newUser.username}@bhw.ppms.gov.ph`;
 
-        setData([...data, user]);
-        setShowCreateModal(false);
-        setNewUser({ role: 'bhw', status: 'Active' });
+            // Pause auth listener so ProtectedRoute doesn't redirect during signUp
+            setSkipAuthChange(true);
+
+            // Save admin's current session before signUp (signUp auto-signs-in the new user)
+            const { data: { session: adminSession } } = await supabase.auth.getSession();
+
+            const { error: authError } = await supabase.auth.signUp({
+                email,
+                password: newUser.password,
+                options: {
+                    data: {
+                        full_name: newUser.name,
+                        role: newUser.role,
+                        barangay: newUser.barangay,
+                        email: newUser.role === 'mho_admin' ? newUser.email : undefined,
+                        username: newUser.role === 'bhw' ? newUser.username : undefined
+                    }
+                }
+            });
+
+            if (authError) throw authError;
+
+            // Restore the admin's session so we don't get kicked out
+            if (adminSession) {
+                await supabase.auth.setSession({
+                    access_token: adminSession.access_token,
+                    refresh_token: adminSession.refresh_token,
+                });
+            }
+
+            // Resume auth listener
+            setSkipAuthChange(false);
+
+            // Profile table will be updated via trigger
+            setShowCreateModal(false);
+            setNewUser({ role: 'bhw', status: 'Active', barangay: BARANGAYS[0] });
+            alert("Account created successfully. The user can now log in.");
+            await fetchUsers();
+        } catch (err: any) {
+            console.error('Account creation error:', err);
+            alert(`Failed to create account: ${err.message}`);
+        } finally {
+            setSkipAuthChange(false);
+            setLoading(false);
+        }
     };
 
-    const handleChangePassword = () => {
+    const handleEditAccount = async () => {
+        if (!editingUser.id) return;
+        setLoading(true);
+        try {
+            const { error } = await supabase
+                .from('profiles')
+                .update({
+                    full_name: editingUser.full_name,
+                    barangay: editingUser.barangay,
+                    status: editingUser.status
+                })
+                .eq('id', editingUser.id);
+
+            if (error) throw error;
+
+            setShowEditModal(false);
+            setEditingUser({});
+            await fetchUsers();
+        } catch (err: any) {
+            console.error('Account update error:', err);
+            alert(`Failed to update account: ${err.message}`);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleDeleteAccount = async () => {
         if (!selectedUser) return;
-        setData(data.map(u => u.id === selectedUser.id ? { ...u, password: newPassword } : u));
-        setShowPasswordModal(false);
-        setNewPassword('');
-        setSelectedUser(null);
-        alert(`Password for ${selectedUser.name} has been changed successfully.`);
+        setLoading(true);
+        try {
+            // Call the SECURITY DEFINER function to delete from auth.users (which cascades to profiles)
+            const { error } = await supabase.rpc('delete_user', { user_id: selectedUser.id });
+
+            if (error) throw error;
+
+            setShowDeleteModal(false);
+            setSelectedUser(null);
+            await fetchUsers();
+            alert("Account successfully deleted.");
+        } catch (err: any) {
+            console.error('Account deletion error:', err);
+            alert(`Failed to delete profile: ${err.message}`);
+        } finally {
+            setLoading(false);
+        }
     };
 
     return (
@@ -236,53 +370,68 @@ const UserManagement = () => {
                 </div>
             </div>
 
-            <div className="bg-white shadow-sm ring-1 ring-gray-900/5 rounded-xl overflow-hidden">
-                <table className="min-w-full divide-y divide-gray-200">
-                    <thead className="bg-gray-50">
-                        {table.getHeaderGroups().map(headerGroup => (
-                            <tr key={headerGroup.id}>
-                                {headerGroup.headers.map(header => (
-                                    <th
-                                        key={header.id}
-                                        className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
-                                    >
-                                        {header.isPlaceholder
-                                            ? null
-                                            : flexRender(
-                                                header.column.columnDef.header,
-                                                header.getContext()
-                                            )}
-                                    </th>
-                                ))}
-                            </tr>
-                        ))}
-                    </thead>
-                    <tbody className="divide-y divide-gray-200 bg-white">
-                        {table.getRowModel().rows.map(row => (
-                            <tr key={row.id} className="hover:bg-gray-50 transition-colors">
-                                {row.getVisibleCells().map(cell => (
-                                    <td key={cell.id} className="px-6 py-4 whitespace-nowrap">
-                                        {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                                    </td>
-                                ))}
-                            </tr>
-                        ))}
-                    </tbody>
-                </table>
-
-                {table.getRowModel().rows.length === 0 && (
-                    <div className="text-center py-12">
-                        <User className="mx-auto h-12 w-12 text-gray-400" />
-                        <h3 className="mt-2 text-sm font-semibold text-gray-900">No users found</h3>
-                        <p className="mt-1 text-sm text-gray-500">Try adjusting your search query.</p>
+            <div className="bg-white shadow-sm ring-1 ring-gray-900/5 rounded-xl min-h-[400px]">
+                {loading && data.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-32 space-y-4">
+                        <Loader2 className="h-10 w-10 text-blue-500 animate-spin" />
+                        <p className="text-gray-500 font-medium">Loading users...</p>
                     </div>
+                ) : (
+                    <>
+                        <table className="min-w-full divide-y divide-gray-200">
+                            <thead className="bg-gray-50">
+                                {table.getHeaderGroups().map(headerGroup => (
+                                    <tr key={headerGroup.id}>
+                                        {headerGroup.headers.map(header => (
+                                            <th
+                                                key={header.id}
+                                                className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                                            >
+                                                {header.isPlaceholder
+                                                    ? null
+                                                    : flexRender(
+                                                        header.column.columnDef.header,
+                                                        header.getContext()
+                                                    )}
+                                            </th>
+                                        ))}
+                                    </tr>
+                                ))}
+                            </thead>
+                            <tbody className="divide-y divide-gray-200 bg-white">
+                                {table.getRowModel().rows.map(row => (
+                                    <tr key={row.id} className="hover:bg-gray-50 transition-colors">
+                                        {row.getVisibleCells().map(cell => (
+                                            <td key={cell.id} className="px-6 py-4 whitespace-nowrap">
+                                                {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                                            </td>
+                                        ))}
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+
+                        {table.getRowModel().rows.length === 0 && (
+                            <div className="text-center py-12">
+                                <User className="mx-auto h-12 w-12 text-gray-400" />
+                                <h3 className="mt-2 text-sm font-semibold text-gray-900">No users found</h3>
+                                <p className="mt-1 text-sm text-gray-500">Try adjusting your search query.</p>
+                            </div>
+                        )}
+                    </>
                 )}
             </div>
 
             {/* Create Account Modal */}
             {showCreateModal && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-                    <div className="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200">
+                <div
+                    className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+                    onClick={() => setShowCreateModal(false)}
+                >
+                    <div
+                        className="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200"
+                        onClick={(e) => e.stopPropagation()}
+                    >
                         <div className="bg-blue-600 p-6 text-white flex justify-between items-center">
                             <h3 className="text-xl font-bold flex items-center">
                                 <UserPlus className="mr-2" />
@@ -366,9 +515,10 @@ const UserManagement = () => {
                             <div className="pt-4">
                                 <button
                                     onClick={handleCreateAccount}
-                                    className="w-full py-3 bg-blue-600 text-white rounded-lg font-bold hover:bg-blue-700 transition-all shadow-md flex items-center justify-center"
+                                    disabled={loading}
+                                    className="w-full py-3 bg-blue-600 text-white rounded-lg font-bold hover:bg-blue-700 transition-all shadow-md flex items-center justify-center disabled:opacity-50"
                                 >
-                                    <Save size={18} className="mr-2" />
+                                    {loading ? <Loader2 className="animate-spin mr-2" size={18} /> : <Save size={18} className="mr-2" />}
                                     Create Account
                                 </button>
                             </div>
@@ -377,41 +527,148 @@ const UserManagement = () => {
                 </div>
             )}
 
-            {/* Change Password Modal */}
-            {showPasswordModal && selectedUser && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-                    <div className="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200">
-                        <div className="bg-amber-600 p-6 text-white flex justify-between items-center">
+            {/* Edit Account Modal */}
+            {showEditModal && (
+                <div
+                    className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+                    onClick={() => setShowEditModal(false)}
+                >
+                    <div
+                        className="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <div className="bg-blue-600 p-6 text-white flex justify-between items-center">
                             <h3 className="text-xl font-bold flex items-center">
-                                <Key className="mr-2" />
-                                Change Password
+                                <Edit className="mr-2" />
+                                Edit Account Details
                             </h3>
-                            <button onClick={() => { setShowPasswordModal(false); setSelectedUser(null); }} className="hover:bg-amber-700 p-1 rounded-full transition-colors">
+                            <button onClick={() => setShowEditModal(false)} className="hover:bg-blue-700 p-1 rounded-full transition-colors">
                                 <X size={24} />
                             </button>
                         </div>
                         <div className="p-8 space-y-4">
-                            <div className="p-4 bg-amber-50 rounded-lg border border-amber-100 mb-2">
-                                <p className="text-sm text-amber-800">You are changing the password for <strong>{selectedUser.name}</strong>.</p>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Account Role</label>
+                                <select
+                                    disabled
+                                    className="w-full px-4 py-2 rounded-lg border border-gray-200 bg-gray-50 text-gray-500 cursor-not-allowed"
+                                    value={editingUser.role}
+                                >
+                                    <option value="bhw">Barangay Health Worker (BHW)</option>
+                                    <option value="mho_admin">MHO Administrator</option>
+                                </select>
+                                <p className="text-[10px] text-gray-400 mt-1 italic">Role cannot be changed after creation.</p>
                             </div>
                             <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">New Password</label>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Full Name</label>
                                 <input
-                                    type="password"
-                                    className="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-amber-500 focus:border-amber-500"
-                                    placeholder="Enter new password"
-                                    value={newPassword}
-                                    onChange={(e) => setNewPassword(e.target.value)}
-                                    autoFocus
+                                    type="text"
+                                    className="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-blue-500 focus:border-blue-500"
+                                    placeholder="Enter full name"
+                                    value={editingUser.full_name || ''}
+                                    onChange={(e) => setEditingUser({ ...editingUser, full_name: e.target.value })}
                                 />
                             </div>
-                            <div className="pt-4">
-                                <button
-                                    onClick={handleChangePassword}
-                                    className="w-full py-3 bg-amber-600 text-white rounded-lg font-bold hover:bg-amber-700 transition-all shadow-md flex items-center justify-center"
+
+                            {editingUser.role === 'mho_admin' ? (
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">Email Address</label>
+                                    <input
+                                        disabled
+                                        type="email"
+                                        className="w-full px-4 py-2 rounded-lg border border-gray-200 bg-gray-50 text-gray-500"
+                                        value={editingUser.email || ''}
+                                    />
+                                </div>
+                            ) : (
+                                <>
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">Username</label>
+                                        <input
+                                            disabled
+                                            type="text"
+                                            className="w-full px-4 py-2 rounded-lg border border-gray-200 bg-gray-50 text-gray-500"
+                                            value={editingUser.username || ''}
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">Assigned Barangay</label>
+                                        <select
+                                            className="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-blue-500 focus:border-blue-500"
+                                            value={editingUser.barangay}
+                                            onChange={(e) => setEditingUser({ ...editingUser, barangay: e.target.value })}
+                                        >
+                                            {BARANGAYS.map(b => <option key={b} value={b}>{b}</option>)}
+                                        </select>
+                                    </div>
+                                </>
+                            )}
+
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Account Status</label>
+                                <select
+                                    className="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-blue-500 focus:border-blue-500"
+                                    value={editingUser.status}
+                                    onChange={(e) => setEditingUser({ ...editingUser, status: e.target.value as any })}
                                 >
-                                    <Save size={18} className="mr-2" />
-                                    Confirm New Password
+                                    <option value="Active">Active</option>
+                                    <option value="Inactive">Inactive</option>
+                                </select>
+                            </div>
+
+                            <div className="pt-4 space-x-3 flex">
+                                <button
+                                    onClick={() => setShowEditModal(false)}
+                                    className="flex-1 py-3 border border-gray-300 text-gray-700 rounded-lg font-bold hover:bg-gray-50 transition-all"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    onClick={handleEditAccount}
+                                    disabled={loading}
+                                    className="flex-1 py-3 bg-blue-600 text-white rounded-lg font-bold hover:bg-blue-700 transition-all shadow-md flex items-center justify-center disabled:opacity-50"
+                                >
+                                    {loading ? <Loader2 className="animate-spin mr-2" size={18} /> : <Save size={18} className="mr-2" />}
+                                    Save Changes
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Delete Confirmation Modal */}
+            {showDeleteModal && selectedUser && (
+                <div
+                    className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+                    onClick={() => { setShowDeleteModal(false); setSelectedUser(null); }}
+                >
+                    <div
+                        className="bg-white rounded-xl shadow-2xl w-full max-w-sm overflow-hidden animate-in zoom-in-95 duration-200"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <div className="p-8 text-center">
+                            <div className="h-16 w-16 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto mb-4">
+                                <AlertTriangle size={32} />
+                            </div>
+                            <h3 className="text-xl font-bold text-gray-900 mb-2">Delete Account?</h3>
+                            <p className="text-gray-500 text-sm mb-6">
+                                Are you sure you want to delete the account for <strong className="text-gray-900">{selectedUser.full_name}</strong>? This will remove their record from the management list.
+                            </p>
+                            <div className="space-y-3">
+                                <button
+                                    onClick={handleDeleteAccount}
+                                    disabled={loading}
+                                    className="w-full py-3 bg-red-600 text-white rounded-lg font-black hover:bg-red-700 transition-all shadow-md uppercase tracking-wider text-xs flex items-center justify-center disabled:opacity-50"
+                                >
+                                    {loading ? <Loader2 className="animate-spin mr-2" size={14} /> : null}
+                                    Yes, Delete Account
+                                </button>
+                                <button
+                                    onClick={() => { setShowDeleteModal(false); setSelectedUser(null); }}
+                                    className="w-full py-3 bg-gray-100 text-gray-600 rounded-lg font-black hover:bg-gray-200 transition-all uppercase tracking-wider text-xs"
+                                >
+                                    Keep Account
                                 </button>
                             </div>
                         </div>

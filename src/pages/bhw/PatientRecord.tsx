@@ -1,28 +1,212 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { mockPatients, mockReferrals, type PregnancyCycle } from '../../lib/mockData';
+import { supabase } from '../../lib/supabase';
 import TimelineView from '../../components/TimelineView';
-import { ArrowLeft, User, MapPin, Calendar, Clock, Send, Save, X, CheckCircle2, MessageSquare, Plus } from 'lucide-react';
+import { ArrowLeft, User, MapPin, Calendar, Clock, Send, Save, X, CheckCircle2, MessageSquare, Plus, Loader2, Beaker } from 'lucide-react';
+import { VALLADOLID_BARANGAYS } from '../../lib/constants';
 
 const BHWPatientRecord = () => {
     const { id } = useParams();
     const navigate = useNavigate();
 
     const [activeTab, setActiveTab] = useState('demographics');
+    const [record, setRecord] = useState<any>(null);
+    const [loading, setLoading] = useState(true);
+    const [selectedCycleId, setSelectedCycleId] = useState<string | null>(null);
 
-    // Portfolio state for real-time updates as we don't have a backend yet
-    const [record, setRecord] = useState<any>(() =>
-        (mockPatients.find(p => p.id === id) || mockReferrals.find(r => r.id === id))
-    );
-
-    const [selectedCycleId, setSelectedCycleId] = useState(record?.cycles?.[0]?.id || 'current');
+    const [milestones, setMilestones] = useState<any[]>([]);
+    const [labs, setLabs] = useState<any[]>([]);
+    const [notes, setNotes] = useState<any[]>([]);
 
     // Note Modal State
     const [showNoteModal, setShowNoteModal] = useState(false);
+    const [showViewResultsModal, setShowViewResultsModal] = useState(false);
+    const [selectedLabForResult, setSelectedLabForResult] = useState<any>(null);
     const [editingMilestone, setEditingMilestone] = useState<any>(null);
     const [tempNote, setTempNote] = useState('');
     const [modalMode, setModalMode] = useState<'view' | 'add'>('view');
     const [saveToast, setSaveToast] = useState<string | null>(null);
+    const [isEditing, setIsEditing] = useState(false);
+    const [editForm, setEditForm] = useState<any>(null);
+    const [isSaving, setIsSaving] = useState(false);
+
+    const fetchData = useCallback(async () => {
+        if (!id) return;
+        setLoading(true);
+        try {
+            // Fetch patient details
+            const { data: patient, error: pError } = await supabase
+                .from('patients')
+                .select('*, pregnancy_cycles(*)')
+                .eq('id', id)
+                .single();
+
+            if (pError) throw pError;
+            setRecord(patient);
+            setEditForm({
+                first_name: patient.first_name,
+                mi: patient.mi || '',
+                last_name: patient.last_name,
+                date_of_birth: patient.date_of_birth || '',
+                age: patient.age,
+                purok: patient.purok || '',
+                contact_no: patient.contact_no || '',
+                barangay: patient.barangay
+            });
+
+            if (patient.pregnancy_cycles && patient.pregnancy_cycles.length > 0) {
+                const activeCycle = patient.pregnancy_cycles.find((c: any) => c.status === 'Active' || c.status === 'active') || patient.pregnancy_cycles[0];
+                setSelectedCycleId(activeCycle.id);
+            }
+        } catch (err) {
+            console.error('Error fetching patient record:', err);
+        } finally {
+            setLoading(false);
+        }
+    }, [id]);
+
+    const fetchCycleDetails = useCallback(async (cycleId: string) => {
+        try {
+            const [
+                { data: milestonesData },
+                { data: labsData },
+                { data: notesData }
+            ] = await Promise.all([
+                supabase.from('milestones').select('*').eq('cycle_id', cycleId).order('order_index', { ascending: true }),
+                supabase.from('laboratories').select('*').eq('cycle_id', cycleId).order('scheduled_date', { ascending: true }),
+                supabase.from('notes').select('*').eq('cycle_id', cycleId).order('created_at', { ascending: true })
+            ]);
+
+            setMilestones(milestonesData || []);
+            setLabs(labsData || []);
+            setNotes(notesData || []);
+        } catch (err) {
+            console.error('Error fetching cycle details:', err);
+        }
+    }, []);
+
+    useEffect(() => {
+        fetchData();
+    }, [fetchData]);
+
+    useEffect(() => {
+        if (selectedCycleId) {
+            fetchCycleDetails(selectedCycleId);
+        }
+    }, [selectedCycleId, fetchCycleDetails]);
+
+    const handleOpenNoteModal = (milestone: any, mode: 'view' | 'add' = 'view') => {
+        setEditingMilestone(milestone);
+        setTempNote('');
+        setModalMode(mode);
+        setShowNoteModal(true);
+    };
+
+    const handleOpenViewResults = (lab: any) => {
+        setSelectedLabForResult(lab);
+        setShowViewResultsModal(true);
+    };
+
+    const handleSaveMilestoneNote = async () => {
+        if (!tempNote.trim() || !editingMilestone || !selectedCycleId) return;
+
+        try {
+            const { data: { user } } = await supabase.auth.getUser();
+
+            // 1. Add note to notes table
+            const { error: noteError } = await supabase.from('notes').insert({
+                cycle_id: selectedCycleId,
+                author_id: user?.id,
+                content: tempNote,
+                title: `Visit Note - ${editingMilestone.title}`
+            });
+
+            if (noteError) throw noteError;
+
+            // 2. Mark milestone as completed
+            const { error: mError } = await supabase.from('milestones').update({
+                status: 'completed'
+            }).eq('id', editingMilestone.id);
+
+            if (mError) throw mError;
+
+            // 3. Mark next milestone as current if applicable
+            const nextMilestone = milestones.find(m => m.order_index === editingMilestone.order_index + 1);
+            if (nextMilestone && nextMilestone.status === 'upcoming') {
+                await supabase.from('milestones').update({
+                    status: 'current'
+                }).eq('id', nextMilestone.id);
+            }
+
+            setSaveToast("Clinical note has been successfully saved to the timeline.");
+            setShowNoteModal(false);
+            fetchCycleDetails(selectedCycleId);
+
+            // Auto-close toast after 3 seconds
+            setTimeout(() => setSaveToast(null), 3000);
+        } catch (err) {
+            console.error('Error saving milestone note:', err);
+            alert('Failed to save note. Please try again.');
+        }
+    };
+
+    const handleSaveDetails = async () => {
+        if (!editForm || !id) return;
+        setIsSaving(true);
+        try {
+            const { error } = await supabase
+                .from('patients')
+                .update({
+                    first_name: editForm.first_name,
+                    mi: editForm.mi || null,
+                    last_name: editForm.last_name,
+                    date_of_birth: editForm.date_of_birth || null,
+                    age: parseInt(editForm.age),
+                    purok: editForm.purok || null,
+                    contact_no: editForm.contact_no || null,
+                    barangay: editForm.barangay
+                })
+                .eq('id', id);
+
+            if (error) throw error;
+
+            setRecord((prev: any) => ({ ...prev, ...editForm }));
+            setIsEditing(false);
+            setSaveToast("Patient demographics updated successfully.");
+            setTimeout(() => setSaveToast(null), 3000);
+        } catch (err) {
+            console.error('Error saving patient details:', err);
+            alert('Failed to save changes. Please try again.');
+        } finally {
+            setIsSaving(false);
+        }
+    };
+
+    const handleEditChange = (field: string, value: string) => {
+        setEditForm((prev: any) => {
+            const newForm = { ...prev, [field]: value };
+            if (field === 'date_of_birth' && value) {
+                const birthDate = new Date(value);
+                const today = new Date();
+                let age = today.getFullYear() - birthDate.getFullYear();
+                const m = today.getMonth() - birthDate.getMonth();
+                if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
+                    age--;
+                }
+                newForm.age = age.toString();
+            }
+            return newForm;
+        });
+    };
+
+    if (loading) {
+        return (
+            <div className="flex flex-col items-center justify-center py-32 space-y-4">
+                <Loader2 className="h-10 w-10 text-green-500 animate-spin" />
+                <p className="text-gray-500 font-medium">Loading patient record...</p>
+            </div>
+        );
+    }
 
     if (!record) {
         return (
@@ -38,71 +222,7 @@ const BHWPatientRecord = () => {
         );
     }
 
-    const currentCycle = record?.cycles?.find((c: PregnancyCycle) => c.id === selectedCycleId) || (record?.cycles?.[0]);
-
-    const handleOpenNoteModal = (milestone: any, mode: 'view' | 'add' = 'view') => {
-        setEditingMilestone(milestone);
-        setTempNote('');
-        setModalMode(mode);
-        setShowNoteModal(true);
-    };
-
-    const handleSaveMilestoneNote = () => {
-        if (!tempNote.trim()) return;
-
-        const newLog = {
-            id: `log-bhw-${Date.now()}`,
-            date: new Date().toISOString(),
-            content: tempNote,
-            physicianName: 'BHW User' // In a real app, this would be the logged-in user name
-        };
-
-        const today = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-
-        const updatedCycles = record.cycles.map((cycle: any) => {
-            if (cycle.id === selectedCycleId) {
-                return {
-                    ...cycle,
-                    milestones: cycle.milestones.map((m: any) => {
-                        if (m.id === editingMilestone.id) {
-                            return {
-                                ...m,
-                                notes: {
-                                    ...m.notes,
-                                    physicianLogs: [...(m.notes?.physicianLogs || []), newLog]
-                                },
-                                status: 'completed',
-                                date: today
-                            };
-                        }
-
-                        // Cascading logic (mirrored from Admin)
-                        if (m.id < editingMilestone.id && m.status !== 'completed') {
-                            return { ...m, status: 'completed' };
-                        }
-                        if (m.id === editingMilestone.id + 1 && m.status === 'upcoming') {
-                            return { ...m, status: 'current' };
-                        }
-                        return m;
-                    })
-                };
-            }
-            return cycle;
-        });
-
-        setRecord({ ...record, cycles: updatedCycles });
-        setSaveToast("Clinical note has been successfully saved to the timeline.");
-        setModalMode('view');
-        setTempNote('');
-
-        // Update local editing milestone to show new log immediately
-        const updatedMilestone = updatedCycles.find((c: any) => c.id === selectedCycleId)
-            ?.milestones.find((m: any) => m.id === editingMilestone.id);
-        setEditingMilestone(updatedMilestone);
-
-        // Auto-close toast after 3 seconds
-        setTimeout(() => setSaveToast(null), 3000);
-    };
+    const currentCycle = record.pregnancy_cycles?.find((c: any) => c.id === selectedCycleId);
 
     return (
         <div className="max-w-5xl mx-auto pb-24">
@@ -144,17 +264,17 @@ const BHWPatientRecord = () => {
                             <User size={40} className="text-green-400" />
                         </div>
                         <div>
-                            <h1 className="text-3xl font-bold text-gray-900">{record.patientName}</h1>
+                            <h1 className="text-3xl font-bold text-gray-900">{record.first_name} {record.last_name}</h1>
                             <div className="mt-2 flex items-center text-gray-600 space-x-4">
                                 <span className="flex items-center"><MapPin size={16} className="mr-1" /> {record.barangay}</span>
                                 <span className="flex items-center"><Calendar size={16} className="mr-1" /> {record.age} years old</span>
-                                <span className="flex items-center"><Clock size={16} className="mr-1" /> EDD: {record.estimatedDue}</span>
+                                <span className="flex items-center"><Clock size={16} className="mr-1" /> EDD: {currentCycle?.estimated_due_date || 'N/A'}</span>
                             </div>
                         </div>
                     </div>
                     <div className="text-right">
                         <p className="text-sm font-medium text-gray-500 uppercase tracking-wider">Record ID</p>
-                        <p className="text-lg font-mono text-gray-900 mt-1">{record.id}</p>
+                        <p className="text-lg font-mono text-gray-900 mt-1">{record.id.slice(0, 8).toUpperCase()}</p>
                     </div>
                 </div>
 
@@ -184,42 +304,112 @@ const BHWPatientRecord = () => {
                 <div className="p-8">
 
                     {activeTab === 'demographics' && (
-                        <div className="grid grid-cols-2 gap-8 relative">
-                            <div className="space-y-6">
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700">First Name</label>
-                                    <input type="text" defaultValue={record.patientName.split(" ")[0]} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-500 focus:ring-green-500 border p-2 text-gray-700" />
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700">Middle Initial</label>
-                                    <input type="text" defaultValue={record.mi || ""} maxLength={2} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-500 focus:ring-green-500 border p-2 text-gray-700" />
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700">Purok</label>
-                                    <input type="text" defaultValue={record.purok || "Purok 1"} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-500 focus:ring-green-500 border p-2 text-gray-700" />
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700">Contact Number</label>
-                                    <input type="text" defaultValue="+63 912 345 6789" className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-500 focus:ring-green-500 border p-2 text-gray-700" />
-                                </div>
+                        <div className="relative">
+                            <div className="flex justify-between items-center mb-6">
+                                <h3 className="text-lg font-bold text-gray-900 uppercase tracking-tight">Patient Demographics</h3>
+                                {!isEditing ? (
+                                    <button
+                                        onClick={() => setIsEditing(true)}
+                                        className="flex items-center text-sm font-bold text-blue-600 hover:text-blue-700 transition-colors"
+                                    >
+                                        Edit Patient Details
+                                    </button>
+                                ) : (
+                                    <button
+                                        onClick={() => setIsEditing(false)}
+                                        className="text-sm font-bold text-gray-500 hover:text-gray-700"
+                                    >
+                                        Cancel
+                                    </button>
+                                )}
                             </div>
-                            <div className="space-y-6">
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700">Last Name</label>
-                                    <input type="text" defaultValue={record.patientName.split(" ").slice(1).join(" ")} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-500 focus:ring-green-500 border p-2 text-gray-700" />
+                            <div className="grid grid-cols-2 gap-8">
+                                <div className="space-y-6">
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700">First Name</label>
+                                        <input
+                                            type="text"
+                                            readOnly={!isEditing}
+                                            value={isEditing ? editForm.first_name : record.first_name}
+                                            onChange={e => handleEditChange('first_name', e.target.value)}
+                                            className={`mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-500 focus:ring-green-500 border p-2 text-gray-700 ${!isEditing ? 'bg-gray-50' : 'bg-white'}`}
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700">Middle Initial</label>
+                                        <input
+                                            type="text"
+                                            readOnly={!isEditing}
+                                            value={isEditing ? editForm.mi : (record.mi || "")}
+                                            onChange={e => handleEditChange('mi', e.target.value)}
+                                            maxLength={2}
+                                            className={`mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-500 focus:ring-green-500 border p-2 text-gray-700 ${!isEditing ? 'bg-gray-50' : 'bg-white'}`}
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700">Date of Birth</label>
+                                        <input
+                                            type="date"
+                                            readOnly={!isEditing}
+                                            value={isEditing ? editForm.date_of_birth : (record.date_of_birth || "")}
+                                            onChange={e => handleEditChange('date_of_birth', e.target.value)}
+                                            className={`mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-500 focus:ring-green-500 border p-2 text-gray-700 ${!isEditing ? 'bg-gray-50' : 'bg-white'}`}
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700">Purok</label>
+                                        <input
+                                            type="text"
+                                            readOnly={!isEditing}
+                                            value={isEditing ? editForm.purok : (record.purok || "")}
+                                            onChange={e => handleEditChange('purok', e.target.value)}
+                                            className={`mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-500 focus:ring-green-500 border p-2 text-gray-700 ${!isEditing ? 'bg-gray-50' : 'bg-white'}`}
+                                        />
+                                    </div>
                                 </div>
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700">Age</label>
-                                    <input type="number" defaultValue={record.age} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-500 focus:ring-green-500 border p-2 text-gray-700" />
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700">Barangay</label>
-                                    <select defaultValue={record.barangay} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-500 focus:ring-green-500 border p-2 text-gray-700">
-                                        <option>Poblacion</option>
-                                        <option>Tabao</option>
-                                        <option>Alijis</option>
-                                        <option>Bayabas</option>
-                                    </select>
+                                <div className="space-y-6">
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700">Last Name</label>
+                                        <input
+                                            type="text"
+                                            readOnly={!isEditing}
+                                            value={isEditing ? editForm.last_name : record.last_name}
+                                            onChange={e => handleEditChange('last_name', e.target.value)}
+                                            className={`mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-500 focus:ring-green-500 border p-2 text-gray-700 ${!isEditing ? 'bg-gray-50' : 'bg-white'}`}
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700">Age</label>
+                                        <input
+                                            type="number"
+                                            readOnly
+                                            value={isEditing ? editForm.age : record.age}
+                                            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm bg-gray-50 border p-2 text-gray-500 cursor-not-allowed"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700">Contact Number</label>
+                                        <input
+                                            type="text"
+                                            readOnly={!isEditing}
+                                            value={isEditing ? editForm.contact_no : (record.contact_no || "")}
+                                            onChange={e => handleEditChange('contact_no', e.target.value)}
+                                            className={`mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-500 focus:ring-green-500 border p-2 text-gray-700 ${!isEditing ? 'bg-gray-50' : 'bg-white'}`}
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700">Barangay</label>
+                                        <select
+                                            disabled={!isEditing}
+                                            value={isEditing ? editForm.barangay : record.barangay}
+                                            onChange={e => handleEditChange('barangay', e.target.value)}
+                                            className={`mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-500 focus:ring-green-500 border p-2 text-gray-700 ${!isEditing ? 'bg-gray-50' : 'bg-white'}`}
+                                        >
+                                            {VALLADOLID_BARANGAYS.map(b => (
+                                                <option key={b} value={b}>{b}</option>
+                                            ))}
+                                        </select>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -227,11 +417,11 @@ const BHWPatientRecord = () => {
 
                     {activeTab === 'timeline' && (
                         <div className="space-y-6">
-                            {record.cycles && record.cycles.length > 0 && (
+                            {record.pregnancy_cycles && record.pregnancy_cycles.length > 0 && (
                                 <div className="flex items-center space-x-4 bg-gray-50 p-3 rounded-lg border border-gray-200">
                                     <span className="text-sm font-medium text-gray-700">Select Pregnancy Cycle:</span>
                                     <div className="flex space-x-2">
-                                        {record.cycles.map((cycle: PregnancyCycle) => (
+                                        {record.pregnancy_cycles.map((cycle: any) => (
                                             <button
                                                 key={cycle.id}
                                                 onClick={() => setSelectedCycleId(cycle.id)}
@@ -240,15 +430,25 @@ const BHWPatientRecord = () => {
                                                     : 'bg-white text-gray-600 border-gray-300 hover:border-green-500'
                                                     }`}
                                             >
-                                                {cycle.status === 'Active' ? 'Current Pregnancy' : `History (${cycle.endDate?.split('-')[0]})`}
+                                                {cycle.status === 'Active' || cycle.status === 'active' ? 'Current Pregnancy' : `History (${new Date(cycle.completed_at).getFullYear()})`}
                                             </button>
                                         ))}
                                     </div>
                                 </div>
                             )}
                             <TimelineView
-                                isPending={record.status === 'Pending'}
-                                milestones={currentCycle?.milestones}
+                                isPending={false}
+                                milestones={milestones.map(m => ({
+                                    ...m,
+                                    notes: {
+                                        physicianLogs: notes.filter(n => n.title?.includes(m.title)).map(n => ({
+                                            id: n.id,
+                                            date: n.created_at,
+                                            content: n.content,
+                                            physicianName: 'Author'
+                                        }))
+                                    }
+                                }))}
                                 isAdmin={true}
                                 onMilestoneClick={handleOpenNoteModal}
                             />
@@ -265,13 +465,39 @@ const BHWPatientRecord = () => {
                                 </div>
                             </div>
 
-                            <div className="py-8 bg-gray-50 rounded-xl border-2 border-dashed border-gray-200 flex flex-col items-center justify-center text-center">
-                                <div className="h-16 w-16 bg-white rounded-full flex items-center justify-center border shadow-sm mb-4">
-                                    <Calendar size={28} className="text-gray-300" />
+                            {labs.length > 0 ? (
+                                <div className="divide-y divide-gray-200 border rounded-lg">
+                                    {labs.map((lab) => (
+                                        <div key={lab.id} className="p-4 flex justify-between items-center">
+                                            <div className="flex flex-col items-start">
+                                                <p className="font-bold text-gray-900">{lab.test_name || 'Laboratory Test'}</p>
+                                                <p className="text-xs text-gray-500">Scheduled: {new Date(lab.scheduled_date).toLocaleDateString()}</p>
+                                            </div>
+                                            <div className="flex items-center space-x-4">
+                                                <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase border ${lab.status === 'Submitted' ? 'bg-green-100 text-green-700 border-green-200' : 'bg-amber-100 text-amber-700 border-amber-200'}`}>
+                                                    {lab.status === 'Submitted' ? 'Completed' : lab.status}
+                                                </span>
+                                                {lab.status === 'Submitted' && (
+                                                    <button
+                                                        onClick={() => handleOpenViewResults(lab)}
+                                                        className="px-4 py-1.5 bg-blue-50 text-blue-600 border border-blue-100 rounded text-xs font-bold hover:bg-blue-100 transition-colors"
+                                                    >
+                                                        View Details
+                                                    </button>
+                                                )}
+                                            </div>
+                                        </div>
+                                    ))}
                                 </div>
-                                <h3 className="text-lg font-medium text-gray-900">No Laboratory Results Found</h3>
-                                <p className="mt-1 text-sm text-gray-500 max-w-xs">Results will be displayed here once uploaded by the MHO laboratory staff.</p>
-                            </div>
+                            ) : (
+                                <div className="py-8 bg-gray-50 rounded-xl border-2 border-dashed border-gray-200 flex flex-col items-center justify-center text-center">
+                                    <div className="h-16 w-16 bg-white rounded-full flex items-center justify-center border shadow-sm mb-4">
+                                        <Calendar size={28} className="text-gray-300" />
+                                    </div>
+                                    <h3 className="text-lg font-medium text-gray-900">No Laboratory Results Found</h3>
+                                    <p className="mt-1 text-sm text-gray-500 max-w-xs">Results will be displayed here once uploaded by the MHO laboratory staff.</p>
+                                </div>
+                            )}
                         </div>
                     )}
 
@@ -279,16 +505,29 @@ const BHWPatientRecord = () => {
             </div>
 
             {/* Sticky Footer */}
-            <div className="fixed bottom-0 left-64 right-0 p-4 bg-white border-t border-gray-200 shadow-lg flex justify-end space-x-4">
+            <div className="fixed bottom-0 left-0 right-0 p-4 bg-white border-t border-gray-200 shadow-lg flex justify-end space-x-4 z-40">
                 <button
                     onClick={() => navigate('/bhw/patients')}
                     className="px-6 py-2.5 border border-gray-300 rounded-lg text-gray-700 font-medium hover:bg-gray-50 transition-colors"
                 >
-                    Cancel Updates
+                    Back to List
                 </button>
-                <button className="px-6 py-2.5 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition-colors flex items-center shadow-sm">
-                    <Save size={20} className="mr-2" />
-                    Save Record Changes
+                <button
+                    onClick={handleSaveDetails}
+                    disabled={!isEditing || isSaving}
+                    className={`px-6 py-2.5 rounded-lg font-medium flex items-center shadow-sm transition-all ${!isEditing ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : 'bg-green-600 text-white hover:bg-green-700'}`}
+                >
+                    {isSaving ? (
+                        <>
+                            <Loader2 size={20} className="mr-2 animate-spin" />
+                            Saving...
+                        </>
+                    ) : (
+                        <>
+                            <Save size={20} className="mr-2" />
+                            Save Record Changes
+                        </>
+                    )}
                 </button>
                 <button
                     onClick={() => navigate(`/bhw/patients/${id}/refer`)}
@@ -324,22 +563,10 @@ const BHWPatientRecord = () => {
                                             Unified Care Progress
                                         </h4>
 
-                                        {((editingMilestone?.notes?.physicianLogs && editingMilestone.notes.physicianLogs.length > 0) ||
-                                            editingMilestone?.notes?.subjective) ? (
+                                        {(editingMilestone?.notes?.physicianLogs && editingMilestone.notes.physicianLogs.length > 0) ? (
                                             <div className="space-y-4">
-                                                {/* Subjective context if exists */}
-                                                {editingMilestone?.notes?.subjective && (
-                                                    <div className="p-4 bg-gray-50 rounded-lg border border-gray-200">
-                                                        <div className="flex justify-between items-center mb-1">
-                                                            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Initial Assessment</p>
-                                                            <span className="text-[9px] text-gray-400 font-mono">{new Date(editingMilestone.notes.subjective.date).toLocaleString()}</span>
-                                                        </div>
-                                                        <p className="text-sm text-gray-600 italic">"{editingMilestone.notes.subjective.content}"</p>
-                                                    </div>
-                                                )}
-
                                                 {/* Progress Logs */}
-                                                {editingMilestone?.notes?.physicianLogs?.map((log: any) => (
+                                                {editingMilestone.notes.physicianLogs.map((log: any) => (
                                                     <div key={log.id} className="p-4 bg-green-50/30 rounded-lg border border-green-100">
                                                         <div className="flex justify-between items-center mb-2">
                                                             <span className="text-[10px] font-bold text-green-700">{log.physicianName}</span>
@@ -399,6 +626,55 @@ const BHWPatientRecord = () => {
                                     </div>
                                 </div>
                             )}
+                        </div>
+                    </div>
+                </div>
+            )}
+            {/* View Lab Results Modal */}
+            {showViewResultsModal && selectedLabForResult && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+                    <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg overflow-hidden animate-in zoom-in-95 duration-200">
+                        <div className="bg-blue-600 p-6 text-white flex justify-between items-center">
+                            <div>
+                                <h3 className="text-xl font-bold flex items-center">
+                                    <Beaker className="mr-2" size={20} />
+                                    Laboratory Result
+                                </h3>
+                                <p className="text-blue-100 text-xs font-medium uppercase tracking-widest mt-1">{selectedLabForResult.test_name}</p>
+                            </div>
+                            <button onClick={() => setShowViewResultsModal(false)} className="hover:bg-blue-700 p-1 rounded-full transition-colors">
+                                <X size={24} />
+                            </button>
+                        </div>
+                        <div className="p-8 space-y-6">
+                            <div className="grid grid-cols-2 gap-4 pb-6 border-b border-gray-100">
+                                <div>
+                                    <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Test Name</p>
+                                    <p className="text-sm font-bold text-gray-900">{selectedLabForResult.test_name}</p>
+                                </div>
+                                <div>
+                                    <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Date Reported</p>
+                                    <p className="text-sm font-bold text-gray-900">{new Date(selectedLabForResult.scheduled_date).toLocaleDateString()}</p>
+                                </div>
+                            </div>
+
+                            <div>
+                                <p className="text-[10px] font-black text-blue-500 uppercase tracking-widest mb-3">Report Findings</p>
+                                <div className="bg-blue-50/50 rounded-xl p-6 border border-blue-100">
+                                    <p className="text-sm text-gray-800 leading-relaxed font-medium whitespace-pre-wrap">
+                                        {selectedLabForResult.result_text || "No detailed findings available for this report."}
+                                    </p>
+                                </div>
+                            </div>
+
+                            <div className="pt-4 flex justify-end">
+                                <button
+                                    onClick={() => setShowViewResultsModal(false)}
+                                    className="px-8 py-3 bg-gray-900 text-white rounded-lg font-bold hover:bg-black transition-all shadow-md"
+                                >
+                                    Close Report
+                                </button>
+                            </div>
                         </div>
                     </div>
                 </div>

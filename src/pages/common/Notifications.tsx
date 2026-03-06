@@ -1,5 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
+import { VALLADOLID_BARANGAYS } from '../../lib/constants';
+import { supabase } from '../../lib/supabase';
 import {
     Bell,
     User,
@@ -8,59 +10,120 @@ import {
     XCircle,
     Clock,
     ChevronRight,
-    Filter
+    Filter,
+    Loader2,
 } from 'lucide-react';
 
 interface Notification {
     id: string;
-    patientId: string;
-    patientName: string;
+    patient_id: string;
     type: 'lab_overdue' | 'referral' | 'system';
     title: string;
     content: string;
-    barangay: string;
-    date: string;
-    isDismissed: boolean;
+    barangay_target: string;
+    is_dismissed: boolean;
+    created_at: string;
+    patient?: {
+        first_name: string;
+        last_name: string;
+    };
 }
 
-// Mock data for initial UI implementation
-const initialNotifications: Notification[] = [
-    {
-        id: 'notif-1',
-        patientId: 'pat-101',
-        patientName: 'Lourdes Garcia',
-        type: 'lab_overdue',
-        title: 'Laboratory Result Overdue',
-        content: 'OGTT (Glucose Test) result was due on April 15, 2026. Please follow up with the patient.',
-        barangay: 'Poblacion',
-        date: '2026-04-16T09:00:00Z',
-        isDismissed: false
-    },
-    {
-        id: 'notif-2',
-        patientId: 'pat-102',
-        patientName: 'Rosa Mendoza',
-        type: 'lab_overdue',
-        title: 'Laboratory Result Overdue',
-        content: 'Standard Prenatal Lab Panel result is overdue. Last checked: March 10, 2026.',
-        barangay: 'Bayabas',
-        date: '2026-03-11T10:30:00Z',
-        isDismissed: false
-    }
-];
+import { useNotification } from '../../contexts/NotificationContext';
 
 const Notifications = () => {
     const navigate = useNavigate();
     const location = useLocation();
-    const [notifications, setNotifications] = useState<Notification[]>(initialNotifications);
-    const portal = location.pathname.startsWith('/admin') ? 'admin' : 'bhw';
+    const { refreshCount } = useNotification();
 
-    const handleDismiss = (e: React.MouseEvent, id: string) => {
+    // Portal and User Context
+    const portal = location.pathname.startsWith('/admin') ? 'admin' : 'bhw';
+    const [userContext, setUserContext] = useState<{ role: string; barangay?: string } | null>(null);
+    const [notifications, setNotifications] = useState<Notification[]>([]);
+    const [loading, setLoading] = useState(true);
+
+    // Filters
+    const [filterType, setFilterType] = useState<string>('all');
+    const [filterBarangay, setFilterBarangay] = useState<string>('all');
+    const [isFilterOpen, setIsFilterOpen] = useState(false);
+
+    const fetchUserAndNotifications = useCallback(async () => {
+        setLoading(true);
+        try {
+            // Get current user session
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) return;
+
+            // Fetch profile for accurate role/barangay
+            const { data: profile, error: profileError } = await supabase
+                .from('profiles')
+                .select('role, barangay')
+                .eq('id', user.id)
+                .single();
+
+            if (profileError) throw profileError;
+
+            const role = profile.role;
+            const barangay = profile.barangay;
+
+            setUserContext({ role, barangay: barangay || undefined });
+
+            // Sync overdue labs before fetching notifications
+            await supabase.rpc('generate_overdue_lab_notifications');
+
+            // Set initial filters based on role
+            if (role === 'bhw') {
+                setFilterType('lab_overdue');
+                setFilterBarangay(barangay || 'all');
+            }
+
+            // Fetch notifications
+            let query = supabase
+                .from('notifications')
+                .select('*, patient:patients(first_name, last_name)')
+                .eq('is_dismissed', false)
+                .order('created_at', { ascending: false });
+
+            if (role === 'bhw') {
+                // BHWs see lab_overdue for their barangay
+                query = query.eq('barangay_target', barangay).eq('type', 'lab_overdue');
+            }
+
+            const { data, error } = await query;
+            if (error) throw error;
+            setNotifications(data || []);
+        } catch (err) {
+            console.error('Error fetching notifications:', err);
+        } finally {
+            setLoading(false);
+        }
+    }, []);
+
+    useEffect(() => {
+        fetchUserAndNotifications();
+    }, [fetchUserAndNotifications]);
+
+    const handleDismiss = async (e: React.MouseEvent, id: string) => {
         e.stopPropagation();
-        setNotifications(notifications.filter(n => n.id !== id));
+        try {
+            const { error } = await supabase
+                .from('notifications')
+                .update({ is_dismissed: true })
+                .eq('id', id);
+
+            if (error) throw error;
+
+            // Immediately update global unread count
+            refreshCount();
+
+            setNotifications(prev => prev.filter(n => n.id !== id));
+        } catch (err) {
+            console.error('Error dismissing notification:', err);
+        }
     };
 
     const handleNavigateToPatient = (patientId: string) => {
+        if (!patientId) return;
         navigate(`/${portal}/patients/${patientId}`);
     };
 
@@ -72,36 +135,129 @@ const Notifications = () => {
         }
     };
 
+    const filteredNotifications = notifications.filter(notif => {
+        const matchesType = filterType === 'all' || notif.type === filterType;
+        const matchesBarangay = filterBarangay === 'all' || notif.barangay_target === filterBarangay;
+        return matchesType && matchesBarangay;
+    });
+
+    if (!userContext) {
+        return (
+            <div className="flex items-center justify-center py-32">
+                <Loader2 className="h-10 w-10 text-blue-500 animate-spin" />
+            </div>
+        );
+    }
+
     return (
         <div className="max-w-4xl mx-auto space-y-6">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between relative">
                 <div>
                     <h1 className="text-3xl font-black tracking-tight text-gray-900">Notifications</h1>
-                    <p className="text-gray-500 mt-1">Manage alerts and follow-ups for patients.</p>
+                    <p className="text-gray-500 mt-1">
+                        {userContext.role === 'bhw'
+                            ? `Overdue lab alerts for ${userContext.barangay} Barangay.`
+                            : 'Manage alerts and follow-ups across all barangays.'}
+                    </p>
                 </div>
-                <div className="flex items-center space-x-2">
-                    <button className="flex items-center space-x-2 px-4 py-2 border rounded-lg hover:bg-gray-50 text-gray-600 transition-colors">
-                        <Filter size={18} />
-                        <span className="font-medium">Filter</span>
-                    </button>
-                </div>
+
+                {userContext.role === 'mho_admin' && (
+                    <div className="relative">
+                        <button
+                            onClick={() => setIsFilterOpen(!isFilterOpen)}
+                            className={`flex items-center space-x-2 px-4 py-2 border rounded-lg transition-all ${isFilterOpen || filterType !== 'all' || filterBarangay !== 'all'
+                                ? 'bg-blue-50 border-blue-200 text-blue-700 font-bold'
+                                : 'bg-white hover:bg-gray-50 text-gray-600 font-medium'
+                                }`}
+                        >
+                            <Filter size={18} />
+                            <span>Filter {(filterType !== 'all' || filterBarangay !== 'all') && '•'}</span>
+                        </button>
+
+                        {isFilterOpen && (
+                            <>
+                                <div
+                                    className="fixed inset-0 z-10"
+                                    onClick={() => setIsFilterOpen(false)}
+                                />
+                                <div className="absolute right-0 mt-2 w-64 bg-white border rounded-xl shadow-lg z-20 p-4 space-y-4">
+                                    <div>
+                                        <label className="text-xs font-black uppercase tracking-wider text-gray-400 block mb-2">Type</label>
+                                        <select
+                                            value={filterType}
+                                            onChange={(e) => setFilterType(e.target.value)}
+                                            className="w-full text-sm border rounded-lg px-2 py-1.5 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                                        >
+                                            <option value="all">All Types</option>
+                                            <option value="lab_overdue">Lab Overdue</option>
+                                            <option value="referral">Referrals</option>
+                                            <option value="system">System</option>
+                                        </select>
+                                    </div>
+
+                                    <div>
+                                        <label className="text-xs font-black uppercase tracking-wider text-gray-400 block mb-2">Barangay</label>
+                                        <select
+                                            value={filterBarangay}
+                                            onChange={(e) => setFilterBarangay(e.target.value)}
+                                            className="w-full text-sm border rounded-lg px-2 py-1.5 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                                        >
+                                            <option value="all">All Barangays</option>
+                                            {VALLADOLID_BARANGAYS.map(b => (
+                                                <option key={b} value={b}>{b}</option>
+                                            ))}
+                                        </select>
+                                    </div>
+
+                                    <div className="pt-2 border-t">
+                                        <button
+                                            onClick={() => {
+                                                setFilterType('all');
+                                                setFilterBarangay('all');
+                                                setIsFilterOpen(false);
+                                            }}
+                                            className="w-full text-xs font-bold text-red-500 hover:text-red-600 text-center py-1"
+                                        >
+                                            Reset Filters
+                                        </button>
+                                    </div>
+                                </div>
+                            </>
+                        )}
+                    </div>
+                )}
             </div>
 
-            <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
-                {notifications.length === 0 ? (
-                    <div className="p-12 text-center">
+
+            <div className="bg-white rounded-xl shadow-sm border overflow-hidden min-h-[400px]">
+                {loading ? (
+                    <div className="flex flex-col items-center justify-center py-32 space-y-4">
+                        <Loader2 className="h-10 w-10 text-blue-500 animate-spin" />
+                        <p className="text-gray-500 font-medium">Loading notifications...</p>
+                    </div>
+                ) : filteredNotifications.length === 0 ? (
+                    <div className="p-12 text-center text-gray-500">
                         <div className="mx-auto w-16 h-16 bg-gray-50 rounded-full flex items-center justify-center mb-4">
                             <Bell className="text-gray-300" size={32} />
                         </div>
-                        <h3 className="text-lg font-bold text-gray-900">All caught up!</h3>
-                        <p className="text-gray-500">You have no new notifications.</p>
+                        <h3 className="text-lg font-bold text-gray-900">No matching notifications</h3>
+                        <p>Try adjusting your filters or clearing them to see all alerts.</p>
+                        <button
+                            onClick={() => {
+                                setFilterType('all');
+                                if (userContext.role === 'mho_admin') setFilterBarangay('all');
+                            }}
+                            className="mt-4 text-sm font-bold text-blue-600 hover:text-blue-700"
+                        >
+                            Reset Filters
+                        </button>
                     </div>
                 ) : (
-                    <div className="divide-y">
-                        {notifications.map((notif) => (
+                    <div className="divide-y divide-gray-100">
+                        {filteredNotifications.map((notif) => (
                             <div
                                 key={notif.id}
-                                onClick={() => handleNavigateToPatient(notif.patientId)}
+                                onClick={() => handleNavigateToPatient(notif.patient_id)}
                                 className="p-6 hover:bg-gray-50 transition-colors cursor-pointer group relative"
                             >
                                 <div className="flex items-start space-x-4">
@@ -114,7 +270,7 @@ const Notifications = () => {
                                                 {notif.title}
                                             </h3>
                                             <span className="text-sm text-gray-400 font-medium">
-                                                {new Date(notif.date).toLocaleDateString()}
+                                                {new Date(notif.created_at).toLocaleDateString()}
                                             </span>
                                         </div>
                                         <p className="text-gray-600 leading-relaxed">
@@ -123,11 +279,11 @@ const Notifications = () => {
                                         <div className="flex items-center space-x-4 pt-2 text-sm">
                                             <div className="flex items-center text-gray-500">
                                                 <User size={14} className="mr-1.5" />
-                                                <span className="font-medium">{notif.patientName}</span>
+                                                <span className="font-medium">{notif.patient ? `${notif.patient.first_name} ${notif.patient.last_name}` : 'System Alert'}</span>
                                             </div>
                                             <div className="flex items-center text-gray-500">
                                                 <MapPin size={14} className="mr-1.5" />
-                                                <span>{notif.barangay}</span>
+                                                <span>{notif.barangay_target}</span>
                                             </div>
                                         </div>
                                     </div>
@@ -148,9 +304,9 @@ const Notifications = () => {
                 )}
             </div>
 
-            {notifications.length > 0 && (
+            {filteredNotifications.length > 0 && (
                 <p className="text-center text-sm text-gray-400">
-                    Showing {notifications.length} active notification{notifications.length > 1 ? 's' : ''}
+                    Showing {filteredNotifications.length} active notification{filteredNotifications.length > 1 ? 's' : ''}
                 </p>
             )}
         </div>

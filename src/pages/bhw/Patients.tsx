@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import {
     createColumnHelper,
@@ -9,14 +9,26 @@ import {
     useReactTable,
     type SortingState,
 } from '@tanstack/react-table';
-import { mockPatients } from '../../lib/mockData';
-import { Search, ArrowUpDown, ArrowUp, ArrowDown, UserPlus, Send } from 'lucide-react';
+import { supabase } from '../../lib/supabase';
+import { Search, ArrowUpDown, ArrowUp, ArrowDown, UserPlus, Send, Loader2, AlertCircle } from 'lucide-react';
 
-type Patient = typeof mockPatients[0];
+interface Patient {
+    id: string;
+    first_name: string;
+    last_name: string;
+    mi: string;
+    age: number;
+    barangay: string;
+    pregnancy_cycles: {
+        status: string;
+    }[];
+}
+
 const columnHelper = createColumnHelper<Patient>();
 
 const columns = [
-    columnHelper.accessor('patientName', {
+    columnHelper.accessor(row => `${row.first_name} ${row.mi ? row.mi + ' ' : ''}${row.last_name}`, {
+        id: 'patientName',
         header: ({ column }) => (
             <button
                 className="flex items-center space-x-1 hover:text-gray-700 font-medium text-xs uppercase tracking-wider"
@@ -39,16 +51,20 @@ const columns = [
         header: 'Age',
         cell: info => <div className="text-gray-500">{info.getValue()} yrs</div>,
     }),
-    columnHelper.accessor('status', {
+    columnHelper.accessor(row => row.pregnancy_cycles?.[0]?.status || 'Inactive', {
+        id: 'status',
         header: 'Status',
-        cell: info => (
-            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${info.getValue() === 'Active'
-                ? 'bg-green-100 text-green-800'
-                : 'bg-gray-100 text-gray-800'
-                }`}>
-                {info.getValue()}
-            </span>
-        ),
+        cell: info => {
+            const status = info.getValue() || 'Inactive';
+            return (
+                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${status === 'Active' || status === 'active'
+                    ? 'bg-green-100 text-green-800'
+                    : 'bg-gray-100 text-gray-800'
+                    }`}>
+                    {status}
+                </span>
+            );
+        },
     }),
     columnHelper.display({
         id: 'actions',
@@ -67,9 +83,57 @@ const columns = [
 ];
 
 const BHWPatients = () => {
-    const [data] = useState(() => [...mockPatients]);
+    const [data, setData] = useState<Patient[]>([]);
+    const [loading, setLoading] = useState(true);
     const [globalFilter, setGlobalFilter] = useState('');
     const [sorting, setSorting] = useState<SortingState>([]);
+    const [bhwBarangay, setBhwBarangay] = useState<string | null>(null);
+
+    // Fetch BHW's barangay on component mount
+    useEffect(() => {
+        const fetchBHWProfile = async () => {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (user) {
+                const { data: profile, error } = await supabase
+                    .from('profiles')
+                    .select('barangay')
+                    .eq('id', user.id)
+                    .single();
+
+                if (error) {
+                    console.error('Error fetching BHW profile:', error);
+                } else if (profile) {
+                    setBhwBarangay(profile.barangay);
+                }
+            }
+        };
+        fetchBHWProfile();
+    }, []);
+
+    const fetchPatients = useCallback(async () => {
+        if (!bhwBarangay) return; // Don't fetch if barangay is not yet known
+
+        setLoading(true);
+        try {
+            const { data: patients, error } = await supabase
+                .from('patients')
+                .select('*, pregnancy_cycles(status)')
+                .eq('is_admitted', true)
+                .eq('barangay', bhwBarangay) // Filter by BHW's barangay
+                .order('last_name', { ascending: true });
+
+            if (error) throw error;
+            setData(patients as any || []);
+        } catch (err) {
+            console.error('Error fetching patients:', err);
+        } finally {
+            setLoading(false);
+        }
+    }, [bhwBarangay]); // Re-run when bhwBarangay changes
+
+    useEffect(() => {
+        fetchPatients();
+    }, [fetchPatients]);
 
     const table = useReactTable({
         data,
@@ -117,31 +181,48 @@ const BHWPatients = () => {
                 </div>
             </div>
 
-            <div className="bg-white shadow-sm ring-1 ring-gray-900/5 rounded-xl overflow-hidden">
-                <table className="min-w-full divide-y divide-gray-200">
-                    <thead className="bg-gray-50">
-                        {table.getHeaderGroups().map(headerGroup => (
-                            <tr key={headerGroup.id}>
-                                {headerGroup.headers.map(header => (
-                                    <th key={header.id} className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                        {header.isPlaceholder ? null : flexRender(header.column.columnDef.header, header.getContext())}
-                                    </th>
+            <div className="bg-white shadow-sm ring-1 ring-gray-900/5 rounded-xl overflow-hidden min-h-[400px]">
+                {loading ? (
+                    <div className="flex flex-col items-center justify-center py-32 space-y-4">
+                        <Loader2 className="h-10 w-10 text-green-500 animate-spin" />
+                        <p className="text-gray-500 font-medium">Loading your patients...</p>
+                    </div>
+                ) : (
+                    <>
+                        <table className="min-w-full divide-y divide-gray-200">
+                            <thead className="bg-gray-50">
+                                {table.getHeaderGroups().map(headerGroup => (
+                                    <tr key={headerGroup.id}>
+                                        {headerGroup.headers.map(header => (
+                                            <th key={header.id} className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                                {header.isPlaceholder ? null : flexRender(header.column.columnDef.header, header.getContext())}
+                                            </th>
+                                        ))}
+                                    </tr>
                                 ))}
-                            </tr>
-                        ))}
-                    </thead>
-                    <tbody className="divide-y divide-gray-200 bg-white">
-                        {table.getRowModel().rows.map(row => (
-                            <tr key={row.id} className="hover:bg-gray-50 transition-colors">
-                                {row.getVisibleCells().map(cell => (
-                                    <td key={cell.id} className="px-6 py-4 whitespace-nowrap">
-                                        {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                                    </td>
+                            </thead>
+                            <tbody className="divide-y divide-gray-200 bg-white">
+                                {table.getRowModel().rows.map(row => (
+                                    <tr key={row.id} className="hover:bg-gray-50 transition-colors">
+                                        {row.getVisibleCells().map(cell => (
+                                            <td key={cell.id} className="px-6 py-4 whitespace-nowrap">
+                                                {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                                            </td>
+                                        ))}
+                                    </tr>
                                 ))}
-                            </tr>
-                        ))}
-                    </tbody>
-                </table>
+                            </tbody>
+                        </table>
+
+                        {table.getRowModel().rows.length === 0 && (
+                            <div className="text-center py-12">
+                                <AlertCircle className="mx-auto h-12 w-12 text-gray-300" />
+                                <h3 className="mt-2 text-sm font-semibold text-gray-900">No patients found</h3>
+                                <p className="mt-1 text-sm text-gray-500">Try registering a new patient or adjusting your search.</p>
+                            </div>
+                        )}
+                    </>
+                )}
             </div>
         </div>
     );

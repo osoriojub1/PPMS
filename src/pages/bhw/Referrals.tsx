@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
     createColumnHelper,
     flexRender,
@@ -8,14 +8,31 @@ import {
     useReactTable,
     type SortingState,
 } from '@tanstack/react-table';
-import { mockReferrals } from '../../lib/mockData';
-import { Search, ArrowUpDown, ArrowUp, ArrowDown, Calendar } from 'lucide-react';
+import { supabase } from '../../lib/supabase';
+import { Search, ArrowUpDown, ArrowUp, ArrowDown, Calendar, Loader2, AlertCircle } from 'lucide-react';
 
-type Referral = typeof mockReferrals[0];
-const columnHelper = createColumnHelper<Referral>();
+interface ReferralRecord {
+    id: string;
+    cycle_id: string;
+    status: string;
+    referred_at: string;
+    pregnancy_cycle: {
+        patient: {
+            first_name: string;
+            last_name: string;
+            age: number;
+        };
+    };
+}
+
+const columnHelper = createColumnHelper<ReferralRecord>();
 
 const columns = [
-    columnHelper.accessor('patientName', {
+    columnHelper.accessor(row => {
+        const p = row.pregnancy_cycle?.patient;
+        return p ? `${p.first_name} ${p.last_name}` : 'N/A';
+    }, {
+        id: 'patientName',
         header: ({ column }) => (
             <button
                 className="flex items-center space-x-1 hover:text-gray-700 font-medium text-xs uppercase tracking-wider"
@@ -27,14 +44,15 @@ const columns = [
         ),
         cell: info => <div className="font-medium text-gray-900">{info.getValue()}</div>,
     }),
-    columnHelper.accessor('age', {
+    columnHelper.accessor(row => row.pregnancy_cycle?.patient?.age, {
+        id: 'age',
         header: 'Age',
         cell: info => <div className="text-gray-500">{info.getValue()} yrs</div>,
     }),
-    columnHelper.accessor('referredDate', {
+    columnHelper.accessor('referred_at', {
         header: 'Date Referred',
         cell: info => {
-            const date = new Date(info.getValue() as string);
+            const date = new Date(info.getValue());
             return (
                 <div className="flex items-center text-gray-500">
                     <Calendar size={16} className="mr-1" />
@@ -60,9 +78,36 @@ const columns = [
 ];
 
 const BHWReferrals = () => {
-    const [data] = useState(() => [...mockReferrals]);
+    const [data, setData] = useState<ReferralRecord[]>([]);
+    const [loading, setLoading] = useState(true);
     const [globalFilter, setGlobalFilter] = useState('');
     const [sorting, setSorting] = useState<SortingState>([]);
+
+    const fetchReferrals = useCallback(async () => {
+        setLoading(true);
+        try {
+            const { data: referrals, error } = await supabase
+                .from('referrals')
+                .select(`
+                    *,
+                    pregnancy_cycle:pregnancy_cycles(
+                        patient:patients(first_name, last_name, age)
+                    )
+                `)
+                .order('referred_at', { ascending: false });
+
+            if (error) throw error;
+            setData(referrals as any || []);
+        } catch (err) {
+            console.error('Error fetching referrals:', err);
+        } finally {
+            setLoading(false);
+        }
+    }, []);
+
+    useEffect(() => {
+        fetchReferrals();
+    }, [fetchReferrals]);
 
     const table = useReactTable({
         data,
@@ -101,31 +146,48 @@ const BHWReferrals = () => {
                 </div>
             </div>
 
-            <div className="bg-white shadow-sm ring-1 ring-gray-900/5 rounded-xl overflow-hidden">
-                <table className="min-w-full divide-y divide-gray-200">
-                    <thead className="bg-gray-50">
-                        {table.getHeaderGroups().map(headerGroup => (
-                            <tr key={headerGroup.id}>
-                                {headerGroup.headers.map(header => (
-                                    <th key={header.id} className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                        {header.isPlaceholder ? null : flexRender(header.column.columnDef.header, header.getContext())}
-                                    </th>
+            <div className="bg-white shadow-sm ring-1 ring-gray-900/5 rounded-xl overflow-hidden min-h-[400px]">
+                {loading ? (
+                    <div className="flex flex-col items-center justify-center py-32 space-y-4">
+                        <Loader2 className="h-10 w-10 text-green-500 animate-spin" />
+                        <p className="text-gray-500 font-medium">Loading your referrals...</p>
+                    </div>
+                ) : (
+                    <>
+                        <table className="min-w-full divide-y divide-gray-200">
+                            <thead className="bg-gray-50">
+                                {table.getHeaderGroups().map(headerGroup => (
+                                    <tr key={headerGroup.id}>
+                                        {headerGroup.headers.map(header => (
+                                            <th key={header.id} className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                                {header.isPlaceholder ? null : flexRender(header.column.columnDef.header, header.getContext())}
+                                            </th>
+                                        ))}
+                                    </tr>
                                 ))}
-                            </tr>
-                        ))}
-                    </thead>
-                    <tbody className="divide-y divide-gray-200 bg-white">
-                        {table.getRowModel().rows.map(row => (
-                            <tr key={row.id} className="hover:bg-gray-50 transition-colors">
-                                {row.getVisibleCells().map(cell => (
-                                    <td key={cell.id} className="px-6 py-4 whitespace-nowrap">
-                                        {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                                    </td>
+                            </thead>
+                            <tbody className="divide-y divide-gray-200 bg-white">
+                                {table.getRowModel().rows.map(row => (
+                                    <tr key={row.id} className="hover:bg-gray-50 transition-colors">
+                                        {row.getVisibleCells().map(cell => (
+                                            <td key={cell.id} className="px-6 py-4 whitespace-nowrap">
+                                                {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                                            </td>
+                                        ))}
+                                    </tr>
                                 ))}
-                            </tr>
-                        ))}
-                    </tbody>
-                </table>
+                            </tbody>
+                        </table>
+
+                        {table.getRowModel().rows.length === 0 && (
+                            <div className="text-center py-12">
+                                <AlertCircle className="mx-auto h-12 w-12 text-gray-300" />
+                                <h3 className="mt-2 text-sm font-semibold text-gray-900">No referrals found</h3>
+                                <p className="mt-1 text-sm text-gray-500">You haven't referred any patients yet.</p>
+                            </div>
+                        )}
+                    </>
+                )}
             </div>
         </div>
     );

@@ -1,4 +1,5 @@
 import { NavLink, Outlet } from 'react-router-dom';
+import { supabase } from '../../lib/supabase';
 import {
     LayoutDashboard,
     Users,
@@ -8,12 +9,29 @@ import {
     LogOut
 } from 'lucide-react';
 
+import { useNotification } from '../../contexts/NotificationContext';
+
 const Sidebar = () => {
+    const { unreadCount } = useNotification();
+
     const navItems = [
         { path: '/bhw', icon: <LayoutDashboard size={20} />, label: 'Dashboard' },
         { path: '/bhw/patients', icon: <Users size={20} />, label: 'My Patients' },
         { path: '/bhw/referrals', icon: <ClipboardList size={20} />, label: 'Referrals' },
-        { path: '/bhw/notifications', icon: <Bell size={20} />, label: 'Notifications' },
+        {
+            path: '/bhw/notifications',
+            icon: (
+                <div className="relative">
+                    <Bell size={20} />
+                    {unreadCount > 0 && (
+                        <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white border-2 border-white shadow-sm">
+                            {unreadCount > 9 ? '9+' : unreadCount}
+                        </span>
+                    )}
+                </div>
+            ),
+            label: 'Notifications'
+        },
         { path: '/bhw/settings', icon: <Settings size={20} />, label: 'Settings' },
     ];
 
@@ -47,7 +65,10 @@ const Sidebar = () => {
             </div>
 
             <div className="p-4 border-t">
-                <button className="flex items-center space-x-3 px-4 py-3 rounded-lg text-gray-600 hover:bg-gray-50 hover:text-gray-900 transition-colors w-full">
+                <button
+                    onClick={() => supabase.auth.signOut()}
+                    className="flex items-center space-x-3 px-4 py-3 rounded-lg text-gray-600 hover:bg-gray-50 hover:text-gray-900 transition-colors w-full"
+                >
                     <LogOut size={20} />
                     <span>Log Out</span>
                 </button>
