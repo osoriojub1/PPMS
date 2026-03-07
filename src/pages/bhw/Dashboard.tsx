@@ -22,7 +22,7 @@ const BHWDashboard = () => {
                     { count: labCount },
                     { data: notes }
                 ] = await Promise.all([
-                    supabase.from('patients').select('*', { count: 'exact', head: true }).eq('is_admitted', true),
+                    supabase.from('patients').select('*', { count: 'exact', head: true }),
                     supabase.from('referrals').select('*', { count: 'exact', head: true }).eq('status', 'Pending'),
                     supabase.from('laboratories').select('*', { count: 'exact', head: true }).eq('status', 'Pending'),
                     supabase.from('notes')

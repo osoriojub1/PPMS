@@ -19,6 +19,7 @@ interface Patient {
     mi: string;
     age: number;
     barangay: string;
+    is_admitted: boolean;
     pregnancy_cycles: {
         status: string;
     }[];
@@ -55,13 +56,23 @@ const columns = [
         id: 'status',
         header: 'Status',
         cell: info => {
-            const status = info.getValue() || 'Inactive';
+            const status = info.getValue();
+            const isAdmitted = info.row.original.is_admitted;
+
+            if (!isAdmitted) {
+                return (
+                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200 shadow-sm">
+                        Pending Admission
+                    </span>
+                );
+            }
+
             return (
                 <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${status === 'Active' || status === 'active'
                     ? 'bg-green-100 text-green-800'
                     : 'bg-gray-100 text-gray-800'
                     }`}>
-                    {status}
+                    {status || 'Inactive'}
                 </span>
             );
         },
@@ -118,7 +129,6 @@ const BHWPatients = () => {
             const { data: patients, error } = await supabase
                 .from('patients')
                 .select('*, pregnancy_cycles(status)')
-                .eq('is_admitted', true)
                 .eq('barangay', bhwBarangay) // Filter by BHW's barangay
                 .order('last_name', { ascending: true });
 

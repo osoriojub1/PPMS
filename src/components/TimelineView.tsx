@@ -11,10 +11,12 @@ interface Milestone {
         subjective?: {
             content: string;
             date: string;
+            authorName?: string;
         };
         objective?: {
             content: string;
             date: string;
+            authorName?: string;
         };
         physicianLogs?: {
             id: string;
@@ -60,16 +62,40 @@ const TimelineView = ({
     isPending,
     milestones = defaultMilestones,
     isAdmin = false,
-    onMilestoneClick
+    onMilestoneClick,
+    title = "Pregnancy Timeline"
 }: {
     isPending: boolean;
     milestones?: Milestone[];
     isAdmin?: boolean;
     onMilestoneClick?: (milestone: Milestone) => void;
+    title?: string;
 }) => {
+    const formatDate = (dateStr?: string) => {
+        if (!dateStr) return 'N/A';
+        try {
+            const d = new Date(dateStr);
+            if (isNaN(d.getTime())) return 'N/A';
+            return d.toLocaleDateString();
+        } catch (e) {
+            return 'N/A';
+        }
+    };
+
+    const formatFullDate = (dateStr?: string) => {
+        if (!dateStr) return 'N/A';
+        try {
+            const d = new Date(dateStr);
+            if (isNaN(d.getTime())) return 'N/A';
+            return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+        } catch (e) {
+            return 'N/A';
+        }
+    };
+
     return (
         <div className="py-6 px-4">
-            <h3 className="text-xl font-bold text-gray-900 mb-10 tracking-tight">DOH Maternal Care Milestones</h3>
+            <h3 className="text-xl font-bold text-gray-900 mb-10 tracking-tight">{title}</h3>
 
             <div className="relative border-l-4 border-gray-100 ml-6 space-y-12">
                 {milestones.map((milestone, index) => {
@@ -133,12 +159,14 @@ const TimelineView = ({
                                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                             {(milestone.notes.subjective || milestone.notes.objective) && (
                                                 <div className="bg-gray-50 rounded-xl p-4 border border-gray-100">
-                                                    <p className="text-[10px] font-bold text-blue-400 uppercase tracking-widest mb-2">BHW Field Notes</p>
+                                                    <p className="text-[10px] font-bold text-blue-400 uppercase tracking-widest mb-2">
+                                                        {milestone.notes.subjective?.authorName || milestone.notes.objective?.authorName || 'BHW Field Notes'}
+                                                    </p>
                                                     {milestone.notes.subjective && (
                                                         <div className="mb-2">
                                                             <div className="flex items-center text-[9px] text-gray-400 font-bold mb-0.5">
                                                                 <Clock size={8} className="mr-1" />
-                                                                {new Date(milestone.notes.subjective.date).toLocaleDateString()}
+                                                                {formatDate(milestone.notes.subjective.date)}
                                                             </div>
                                                             <p className="text-sm text-gray-600 italic">"{milestone.notes.subjective.content}"</p>
                                                         </div>
@@ -147,7 +175,7 @@ const TimelineView = ({
                                                         <div>
                                                             <div className="flex items-center text-[9px] text-gray-400 font-bold mb-0.5">
                                                                 <Clock size={8} className="mr-1" />
-                                                                {new Date(milestone.notes.objective.date).toLocaleDateString()}
+                                                                {formatDate(milestone.notes.objective.date)}
                                                             </div>
                                                             <p className="text-xs font-bold text-gray-800">{milestone.notes.objective.content}</p>
                                                         </div>
@@ -163,7 +191,7 @@ const TimelineView = ({
                                                             <div key={log.id} className="text-sm border-l-2 border-blue-200 pl-3">
                                                                 <div className="flex items-center text-[10px] text-blue-400 font-bold mb-1">
                                                                     <Clock size={10} className="mr-1" />
-                                                                    {new Date(log.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                                                                    {formatFullDate(log.date)}
                                                                     <span className="ml-2 text-blue-300">— {log.physicianName}</span>
                                                                 </div>
                                                                 <p className="text-blue-900 font-medium leading-relaxed text-xs">{log.content}</p>

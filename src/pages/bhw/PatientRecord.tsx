@@ -24,6 +24,7 @@ const BHWPatientRecord = () => {
     const [selectedLabForResult, setSelectedLabForResult] = useState<any>(null);
     const [editingMilestone, setEditingMilestone] = useState<any>(null);
     const [tempNote, setTempNote] = useState('');
+    const [tempNoteTitle, setTempNoteTitle] = useState('');
     const [modalMode, setModalMode] = useState<'view' | 'add'>('view');
     const [saveToast, setSaveToast] = useState<string | null>(null);
     const [isEditing, setIsEditing] = useState(false);
@@ -74,7 +75,7 @@ const BHWPatientRecord = () => {
             ] = await Promise.all([
                 supabase.from('milestones').select('*').eq('cycle_id', cycleId).order('order_index', { ascending: true }),
                 supabase.from('laboratories').select('*').eq('cycle_id', cycleId).order('scheduled_date', { ascending: true }),
-                supabase.from('notes').select('*').eq('cycle_id', cycleId).order('created_at', { ascending: true })
+                supabase.from('notes').select('*, profiles(full_name)').eq('cycle_id', cycleId).order('created_at', { ascending: true })
             ]);
 
             setMilestones(milestonesData || []);
@@ -98,6 +99,7 @@ const BHWPatientRecord = () => {
     const handleOpenNoteModal = (milestone: any, mode: 'view' | 'add' = 'view') => {
         setEditingMilestone(milestone);
         setTempNote('');
+        setTempNoteTitle('');
         setModalMode(mode);
         setShowNoteModal(true);
     };
@@ -112,13 +114,22 @@ const BHWPatientRecord = () => {
 
         try {
             const { data: { user } } = await supabase.auth.getUser();
+            let authorName = 'BHW Staff';
+            if (user) {
+                const { data: profile } = await supabase.from('profiles').select('full_name').eq('id', user.id).single();
+                if (profile?.full_name) authorName = profile.full_name;
+            }
 
             // 1. Add note to notes table
             const { error: noteError } = await supabase.from('notes').insert({
                 cycle_id: selectedCycleId,
+                milestone_id: editingMilestone.id,
                 author_id: user?.id,
                 content: tempNote,
-                title: `Visit Note - ${editingMilestone.title}`
+                type: 'subjective',
+                title: tempNoteTitle.trim() || `BHW Note - ${editingMilestone.title}`,
+                physician_name: authorName,
+                patient_id: id
             });
 
             if (noteError) throw noteError;
@@ -438,17 +449,42 @@ const BHWPatientRecord = () => {
                             )}
                             <TimelineView
                                 isPending={false}
-                                milestones={milestones.map(m => ({
-                                    ...m,
-                                    notes: {
-                                        physicianLogs: notes.filter(n => n.title?.includes(m.title)).map(n => ({
-                                            id: n.id,
-                                            date: n.created_at,
-                                            content: n.content,
-                                            physicianName: 'Author'
-                                        }))
-                                    }
-                                }))}
+                                milestones={milestones.map(m => {
+                                    const mNotes = notes.filter(n =>
+                                        n.milestone_id === m.id ||
+                                        (!n.milestone_id && n.title?.includes(m.title))
+                                    );
+                                    const subjectiveNotes = mNotes.filter(n => n.type === 'subjective').sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+                                    const objectiveNotes = mNotes.filter(n => n.type === 'objective').sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+
+                                    const subjectiveNote = subjectiveNotes[0];
+                                    const objectiveNote = objectiveNotes[0];
+
+                                    const progressLogs = mNotes.filter(n => n !== subjectiveNote && n !== objectiveNote)
+                                        .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+
+                                    return {
+                                        ...m,
+                                        notes: {
+                                            subjective: subjectiveNote ? {
+                                                content: subjectiveNote.content,
+                                                date: subjectiveNote.created_at,
+                                                authorName: subjectiveNote.profiles?.full_name || subjectiveNote.physician_name || 'BHW'
+                                            } : undefined,
+                                            objective: objectiveNote ? {
+                                                content: objectiveNote.content,
+                                                date: objectiveNote.created_at,
+                                                authorName: objectiveNote.profiles?.full_name || objectiveNote.physician_name || 'BHW'
+                                            } : undefined,
+                                            physicianLogs: progressLogs.map(n => ({
+                                                id: n.id,
+                                                date: n.created_at,
+                                                content: n.content,
+                                                physicianName: n.physician_name || n.profiles?.full_name || 'Medical Staff'
+                                            }))
+                                        }
+                                    };
+                                })}
                                 isAdmin={true}
                                 onMilestoneClick={handleOpenNoteModal}
                             />
@@ -563,9 +599,36 @@ const BHWPatientRecord = () => {
                                             Unified Care Progress
                                         </h4>
 
+                                        {/* BHW Context if exists */}
+                                        {(editingMilestone?.notes?.subjective || editingMilestone?.notes?.objective) && (
+                                            <div className="p-4 bg-gray-50 rounded-lg border border-gray-200 space-y-3 mb-6">
+                                                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest border-b border-gray-100 pb-1">BHW Referral Context</p>
+
+                                                {editingMilestone.notes.subjective && (
+                                                    <div>
+                                                        <div className="flex justify-between items-center mb-0.5">
+                                                            <span className="text-[9px] font-bold text-blue-400 uppercase tracking-tighter">Subjective</span>
+                                                            <span className="text-[9px] text-gray-400 font-mono">{new Date(editingMilestone.notes.subjective.date).toLocaleString()}</span>
+                                                        </div>
+                                                        <p className="text-sm text-gray-600 italic">"{editingMilestone.notes.subjective.content}"</p>
+                                                    </div>
+                                                )}
+
+                                                {editingMilestone.notes.objective && (
+                                                    <div>
+                                                        <div className="flex justify-between items-center mb-0.5">
+                                                            <span className="text-[9px] font-bold text-blue-400 uppercase tracking-tighter">Objective</span>
+                                                            <span className="text-[9px] text-gray-400 font-mono">{new Date(editingMilestone.notes.objective.date).toLocaleString()}</span>
+                                                        </div>
+                                                        <p className="text-sm text-gray-900 font-medium">{editingMilestone.notes.objective.content}</p>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        )}
+
                                         {(editingMilestone?.notes?.physicianLogs && editingMilestone.notes.physicianLogs.length > 0) ? (
                                             <div className="space-y-4">
-                                                {/* Progress Logs */}
+                                                <h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-widest border-b border-gray-100 pb-1">Medical Staff Notes</h4>
                                                 {editingMilestone.notes.physicianLogs.map((log: any) => (
                                                     <div key={log.id} className="p-4 bg-green-50/30 rounded-lg border border-green-100">
                                                         <div className="flex justify-between items-center mb-2">
@@ -577,10 +640,12 @@ const BHWPatientRecord = () => {
                                                 ))}
                                             </div>
                                         ) : (
-                                            <div className="text-center py-12">
-                                                <MessageSquare size={48} className="mx-auto text-gray-100 mb-2" />
-                                                <p className="text-sm text-gray-400 italic">No notes recorded for this milestone.</p>
-                                            </div>
+                                            (!editingMilestone?.notes?.subjective && !editingMilestone?.notes?.objective) && (
+                                                <div className="text-center py-12">
+                                                    <MessageSquare size={48} className="mx-auto text-gray-100 mb-2" />
+                                                    <p className="text-sm text-gray-400 italic">No notes recorded for this milestone.</p>
+                                                </div>
+                                            )
                                         )}
                                     </div>
 
@@ -596,6 +661,16 @@ const BHWPatientRecord = () => {
                                 </div>
                             ) : (
                                 <div className="space-y-6">
+                                    <div>
+                                        <label className="block text-sm font-bold text-gray-700 mb-2 uppercase tracking-tight">Note Title</label>
+                                        <input
+                                            type="text"
+                                            value={tempNoteTitle}
+                                            onChange={(e) => setTempNoteTitle(e.target.value)}
+                                            placeholder="e.g. Home Visit Follow-up, Patient Complaint..."
+                                            className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-green-500 focus:border-green-500 transition-all shadow-sm font-medium text-sm"
+                                        />
+                                    </div>
                                     <div>
                                         <label className="block text-sm font-bold text-gray-700 mb-2 uppercase tracking-tight">Clinical Observations / Action Taken</label>
                                         <textarea
